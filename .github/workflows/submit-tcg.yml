@@ -304,6 +304,7 @@ jobs:
               strategy=importlib.util.module_from_spec(spec); spec.loader.exec_module(strategy)
               match_id=join_data.get("matchId")
               started=time.time(); actions=0; last_status=join_data.get("status"); terminal=None
+              saw_active=False
               while time.time()-started < 600 and actions < 600:
                   status, data, raw=request("/tcg/pending-actions?competitionId="+CID)
                   if status!=200:
@@ -313,6 +314,20 @@ jobs:
                   matches=data.get("activeMatches",[]) if isinstance(data,dict) else []
                   if not match_id and matches and isinstance(matches,list):
                       match_id=matches[0].get("matchId") or matches[0].get("id")
+                  active_ids={m.get("matchId") or m.get("id") for m in matches if isinstance(m,dict)}
+                  pending_ids={p.get("matchId") for p in pending if isinstance(p,dict)}
+                  if match_id and match_id in active_ids:
+                      saw_active=True
+                  elif match_id and saw_active and match_id not in pending_ids:
+                      # An opponent's final move may settle the match without our action
+                      # response carrying matchStatus. Check the authoritative public battle.
+                      battle_status, battle, _ = request("/tcg/battle/"+str(match_id), auth=False)
+                      if battle_status==200 and isinstance(battle,dict) and battle.get("status") in ("Settled","Aborted"):
+                          terminal=battle.get("status")
+                          print("OWNER_HOSTED_MATCH_FINISHED:",json.dumps({
+                              "matchId":match_id,"matchStatus":terminal,"decisions":actions,
+                              "result":battle.get("result")},default=str))
+                          raise SystemExit(0)
                   for item in pending if isinstance(pending,list) else []:
                       current_id=item.get("matchId")
                       if match_id and current_id and current_id!=match_id:
@@ -324,12 +339,24 @@ jobs:
                       st, result, raw2=request("/tcg/action","POST",{"matchId":match_id,"seq":item.get("seq"),"action":response})
                       actions+=1
                       if st not in (200,201):
+                          # If the game ended between the GET and POST, verify its terminal
+                          # status before treating it as a strategy error.
+                          battle_status, battle, _ = request("/tcg/battle/"+str(match_id), auth=False)
+                          if battle_status==200 and isinstance(battle,dict) and battle.get("status") in ("Settled","Aborted"):
+                              print("OWNER_HOSTED_MATCH_FINISHED:",json.dumps({
+                                  "matchId":match_id,"matchStatus":battle.get("status"),"decisions":actions,
+                                  "result":battle.get("result")},default=str))
+                              raise SystemExit(0)
                           print("OWNER_HOSTED_ACTION_REJECTED:",json.dumps({"httpStatus":st,"details":str(result)[:300]}))
                           raise SystemExit(31)
                       if isinstance(result,dict):
                           terminal=result.get("matchStatus")
                       if terminal in ("Settled","Aborted"):
-                          print("OWNER_HOSTED_MATCH_FINISHED:",json.dumps({"matchId":match_id,"matchStatus":terminal,"decisions":actions}))
+                          battle_status, battle, _ = request("/tcg/battle/"+str(match_id), auth=False)
+                          match_result=battle.get("result") if battle_status==200 and isinstance(battle,dict) else None
+                          print("OWNER_HOSTED_MATCH_FINISHED:",json.dumps({
+                              "matchId":match_id,"matchStatus":terminal,"decisions":actions,
+                              "result":match_result},default=str))
                           raise SystemExit(0)
                   time.sleep(0.75)
               print("OWNER_HOSTED_JOIN_ACCEPTED_BUT_MATCH_NOT_SETTLED_WITHIN_WINDOW:",
