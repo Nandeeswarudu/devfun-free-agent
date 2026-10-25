@@ -1,70 +1,54 @@
 
-name: DevFun Free Agent Check
+name: DevFun Free TCG Setup
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 */6 * * *"
 
 permissions:
   contents: read
 
 jobs:
-  check:
+  inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Inspect free competition and Groq
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      - name: Inspect TCG API and card catalog
         run: |
           python - <<'PY'
           import json
-          import os
           import urllib.request
-          import urllib.error
+          from urllib.parse import urlencode
 
           base = "https://arena.dev.fun/api/arena"
           cid = "cmvmddsux8tt6ymnx3teo78ie"
 
-          def get_json(url, headers=None):
-              req = urllib.request.Request(url, headers=headers or {})
-              with urllib.request.urlopen(req, timeout=25) as r:
+          def get(path):
+              req = urllib.request.Request(
+                  base + path,
+                  headers={"Accept": "application/json"}
+              )
+              with urllib.request.urlopen(req, timeout=30) as r:
                   return json.load(r)
 
-          # Read the competition's current rules.
-          details = get_json(
-              f"{base}/competition?competitionId={cid}"
+          # Read the authoritative API schemas.
+          data = get("/__introspection")
+          print("=== API INTROSPECTION ===")
+          print(json.dumps(data, indent=2)[:18000])
+
+          # Read the live card catalog for this competition.
+          path = "/tcg/cards?" + urlencode(
+              {"competitionId": cid}
           )
-          print("=== PLAYGROUND RULES ===")
-          print(json.dumps(details, indent=2)[:12000])
+          cards = get(path)
 
-          # Fetch the skill document named by the API.
-          skill = details.get("skillFile") if isinstance(details, dict) else None
-          if skill:
-              url = "https://arena.dev.fun/skills/" + skill
-              req = urllib.request.Request(url)
-              try:
-                  with urllib.request.urlopen(req, timeout=25) as r:
-                      text = r.read().decode("utf-8")
-                  print("=== SKILL DOCUMENT ===")
-                  print(text[:18000])
-              except Exception as e:
-                  print("Could not fetch skill document:", str(e))
+          if isinstance(cards, dict):
+              items = cards.get("cards", cards.get("data", []))
+          else:
+              items = cards
 
-          # List Groq models without generating a completion.
-          key = os.environ.get("GROQ_API_KEY", "")
-          if not key:
-              raise SystemExit("GROQ_API_KEY secret is missing.")
+          print("\n=== CARD CATALOG SUMMARY ===")
+          print("Card count:", len(items))
+          print("First 40 cards:")
+          print(json.dumps(items[:40], indent=2)[:14000])
 
-          try:
-              models = get_json(
-                  "https://api.groq.com/openai/v1/models",
-                  {"Authorization": "Bearer " + key}
-              )
-              print("=== GROQ MODEL IDS ===")
-              for item in models.get("data", [])[:30]:
-                  print(item.get("id", "(unnamed)"))
-          except Exception as e:
-              print("Groq model listing failed:", str(e))
-              raise
+          print("\nInspection complete. No agent was submitted.")
           PY
