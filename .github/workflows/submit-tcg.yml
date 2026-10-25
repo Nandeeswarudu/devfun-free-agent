@@ -4,9 +4,14 @@ on:
   push:
     paths:
       - ".submit-tcg-trigger"
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: devfun-tcg-playground-s4
+  cancel-in-progress: false
 
 jobs:
   enter:
