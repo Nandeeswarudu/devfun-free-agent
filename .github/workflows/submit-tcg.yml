@@ -1,0 +1,402 @@
+name: Enter free TCG Playground Season 4
+
+on:
+  push:
+    paths:
+      - ".submit-tcg-trigger"
+
+permissions:
+  contents: read
+
+jobs:
+  enter:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out strategy
+        uses: actions/checkout@v4
+
+      - name: Verify eligibility, build legal deck, and join free practice
+        env:
+          ARENA_API_KEY: ${{ secrets.ARENA_API_KEY }}
+        run: |
+          python - <<'PY'
+          import collections
+          import importlib.util
+          import json
+          import os
+          import re
+          import secrets
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          BASE = "https://arena.dev.fun/api/arena"
+          CID = "cmvmddsux8tt6ymnx3teo78ie"
+          KEY = os.environ.get("ARENA_API_KEY", "").strip()
+          if not KEY:
+              print("STOP: GitHub Actions secret ARENA_API_KEY is missing.")
+              raise SystemExit(10)
+
+          HEADERS = {"Accept": "application/json", "x-arena-api-key": KEY}
+          def request(path, method="GET", body=None, auth=True, extra_headers=None):
+              data = None if body is None else json.dumps(body).encode("utf-8")
+              headers = dict(HEADERS if auth else {"Accept":"application/json"})
+              if data is not None:
+                  headers["Content-Type"] = "application/json"
+              if extra_headers:
+                  headers.update(extra_headers)
+              req = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=45) as response:
+                      raw = response.read()
+                      try: parsed = json.loads(raw)
+                      except Exception: parsed = {"raw": raw.decode("utf-8","replace")[:1000]}
+                      return response.status, parsed, raw
+              except urllib.error.HTTPError as e:
+                  raw = e.read()
+                  try: parsed = json.loads(raw)
+                  except Exception: parsed = {"raw": raw.decode("utf-8","replace")[:1000]}
+                  return e.code, parsed, raw
+              except Exception as e:
+                  return 0, {"error": type(e).__name__, "message": str(e)[:300]}, b""
+
+          def get(path, auth=True):
+              status, data, raw = request(path, auth=auth)
+              if status != 200:
+                  print(json.dumps({"readError":True,"status":status,"path":path,
+                      "response": {k:v for k,v in data.items() if k not in ("apiKey","claimToken","token","secret")} if isinstance(data,dict) else str(data)[:500}}))
+                  raise SystemExit(11)
+              return data
+
+          # Fresh official skill + introspection, then live season metadata.
+          guide_req = urllib.request.Request("https://arena.dev.fun/skills/tcg-playground.md")
+          try:
+              with urllib.request.urlopen(guide_req, timeout=30) as response:
+                  guide = response.read().decode("utf-8","replace")
+          except Exception as e:
+              print("STOP: Could not read the official TCG Playground guide:", type(e).__name__)
+              raise SystemExit(12)
+          if "Join by Hosted Bundle" not in guide or "joinPayload" not in guide:
+              print("STOP: Official TCG guide structure did not match expected hosted-bundle instructions.")
+              raise SystemExit(13)
+          introspection = get("/__introspection", auth=False)
+          if not isinstance(introspection,dict):
+              print("STOP: Arena API introspection returned unexpected data.")
+              raise SystemExit(14)
+
+          active = get("/competition/list-active", auth=False)
+          active_item = next((x for x in active if isinstance(x,dict) and x.get("id")==CID), None) if isinstance(active,list) else None
+          detail = get("/competition?competitionId="+CID, auth=False)
+          rules = str(detail.get("rules") or "").lower()
+          if not active_item or active_item.get("name") != "[TCG] Playground S4":
+              print("STOP: The exact requested TCG Playground Season 4 is not in the active competition list.")
+              raise SystemExit(15)
+          if detail.get("status") != "Active" or (active_item.get("admissionMode") not in (None,"Open")):
+              print("STOP: This exact season is not active/open for entry.")
+              print(json.dumps({"status":detail.get("status"),"admissionMode":active_item.get("admissionMode")}))
+              raise SystemExit(16)
+          if detail.get("gameType") != "PokemonTcg" or "free" not in rules or "nothing at stake" not in rules or "300 matches" not in rules:
+              print("STOP: Live rules no longer confirm free no-stakes practice with a 300-match season allowance.")
+              print(json.dumps({"gameType":detail.get("gameType"),"rules":detail.get("rules")}))
+              raise SystemExit(17)
+          print("PREFLIGHT_OK")
+          print(json.dumps({"competition":detail.get("name"),"id":CID,"status":detail.get("status"),
+              "admissionMode":active_item.get("admissionMode"),"executionMode":detail.get("executionMode"),
+              "entry":"free","stakes":"none","seasonMatchAllowance":"300 shared across all versions"},indent=2))
+
+          profile = get("/agent/me")
+          if profile.get("status") != "Active":
+              print("STOP: Agent profile is not Active; no entry request was sent.")
+              print(json.dumps({k:profile.get(k) for k in ("id","handle","name","status") if k in profile}))
+              raise SystemExit(18)
+
+          history = get("/agent/submissions?competitionId="+CID+"&limit=100")
+          records = history.get("data",[]) if isinstance(history,dict) else []
+          active_records = []
+          for item in records if isinstance(records,list) else []:
+              data = item.get("data") if isinstance(item.get("data"),dict) else {}
+              status = str(item.get("status") or "").lower()
+              template = str(data.get("template") or item.get("template") or "").lower()
+              if template == "engine-agent" and status in ("queued","processing","validating","active","pending"):
+                  active_records.append({"id":item.get("id"),"status":item.get("status")})
+          if active_records:
+              print("STOP: Existing hosted TCG submission found; not creating a duplicate.")
+              print(json.dumps(active_records,indent=2))
+              raise SystemExit(19)
+          if int(history.get("total",0) if isinstance(history,dict) else 0) > 0:
+              print("NOTE: Prior submission history exists. Only a new active/pending submission prevents entry.")
+
+          cards_resp = get("/tcg/cards?competitionId="+CID, auth=False)
+          cards = cards_resp.get("cards",cards_resp.get("data",[])) if isinstance(cards_resp,dict) else cards_resp
+          attack_resp = get("/tcg/attacks?competitionId="+CID, auth=False)
+          attacks = attack_resp.get("attacks",attack_resp.get("data",[])) if isinstance(attack_resp,dict) else attack_resp
+          if not isinstance(cards,list) or not isinstance(attacks,list):
+              print("STOP: Card or attack catalog has unexpected shape.")
+              raise SystemExit(20)
+          card_map = {int(c["cardId"]):c for c in cards if isinstance(c,dict) and c.get("cardId") is not None}
+          attack_map = {int(a["attackId"]):a for a in attacks if isinstance(a,dict) and a.get("attackId") is not None}
+
+          def attack_value(a, energy_type):
+              energies = a.get("energies") or []
+              if not isinstance(energies,list):
+                  return -1e9
+              # 0 is Colorless; the deck's other energy type is fixed.
+              if any(e not in (0, energy_type) for e in energies):
+                  return -1e9
+              damage = float(a.get("damage") or 0)
+              txt = str(a.get("text") or "").lower()
+              bonus = 0
+              if "draw" in txt or "search your deck" in txt:
+                  bonus += 24
+              if "attach" in txt or "heal" in txt:
+                  bonus += 18
+              if "paralyzed" in txt or "can't retreat" in txt or "knocked out" in txt:
+                  bonus += 14
+              if "does 30 damage to itself" in txt or "discard all energy" in txt:
+                  bonus -= 25
+              return 1.15*damage - 14*len(energies) + bonus
+
+          def card_score(c, energy_type):
+              hp = float(c.get("hp") or 0)
+              atks = [attack_map.get(int(a)) for a in c.get("attacks",[]) if str(a).isdigit() and int(a) in attack_map]
+              vals = [attack_value(a,energy_type) for a in atks]
+              vals = [v for v in vals if v > -1e8]
+              if not vals:
+                  return -1e9
+              txt = str(c.get("name") or "").lower()
+              bonus = 9 if "ex" in txt else 0
+              return hp*0.62 + max(vals) + bonus
+
+          # Compare monotype energy plans using the live card/attack catalog.
+          plans = {}
+          for et in range(1,10):
+              pool = []
+              for c in cards:
+                  if not isinstance(c,dict) or c.get("hp",0) <= 0 or c.get("basic") is not True or c.get("aceSpec") is True:
+                      continue
+                  if int(c.get("cardType",-1)) != 0:
+                      continue
+                  native = c.get("energyType")
+                  if native not in (0,et):
+                      continue
+                  score = card_score(c,et)
+                  if score > -1e8:
+                      pool.append((score,c))
+              # Avoid duplicate Pokémon names; enforce the four-copy limit later.
+              pool.sort(key=lambda p:p[0],reverse=True)
+              selected=[]; names=set()
+              for score,c in pool:
+                  name = re.sub(r"[^a-z0-9]+"," ",str(c.get("name") or "").lower()).strip()
+                  if name in names: continue
+                  names.add(name); selected.append((score,c))
+                  if len(selected)==6: break
+              if len(selected)>=6:
+                  plans[et]=selected
+          if not plans:
+              print("STOP: Couldn't find six legal Basic Pokémon for any monotype energy plan.")
+              raise SystemExit(21)
+          energy_type, chosen = max(plans.items(),key=lambda x:sum(s for s,c in x[1]))
+          pokemon = [c for s,c in chosen]
+          energy_candidates = [c for c in cards if isinstance(c,dict) and int(c.get("cardType",-1))==5
+              and c.get("energyType")==energy_type and "energy" in str(c.get("name","")).lower()]
+          if not energy_candidates:
+              print("STOP: No Basic Energy card in the chosen type was found.")
+              raise SystemExit(22)
+          energy_candidates.sort(key=lambda c:(0 if "basic" in str(c.get("name","")).lower() else 1, int(c.get("cardId",999999))))
+          energy = energy_candidates[0]
+
+          # Prefer reliable draw/search/switch utility; never include ACE SPEC.
+          targets = [
+              ("professor's research", "professor"),
+              ("nest ball", "nest ball"),
+              ("ultra ball", "ultra ball"),
+              ("boss's orders", "boss"),
+              ("switch", "switch"),
+              ("iono", "iono"),
+              ("energy retrieval", "energy retrieval"),
+              ("earthen vessel", "earthen vessel"),
+              ("buddy-buddy poffin", "poffin"),
+              ("pokegear 3.0", "pokegear"),
+          ]
+          trainers = []
+          used_names=set()
+          nonpokemon=[c for c in cards if isinstance(c,dict) and int(c.get("cardType",-1)) not in (0,5)
+              and float(c.get("hp") or 0)==0 and c.get("aceSpec") is not True]
+          for needle,label in targets:
+              match = next((c for c in nonpokemon if needle in str(c.get("name","")).lower()
+                  and re.sub(r"[^a-z0-9]+"," ",str(c.get("name","")).lower()).strip() not in used_names),None)
+              if match:
+                  trainers.append(match)
+                  used_names.add(re.sub(r"[^a-z0-9]+"," ",str(match.get("name","")).lower()).strip())
+              if len(trainers)==4: break
+          if len(trainers)<4:
+              fallback = sorted(nonpokemon,key=lambda c:(
+                  -sum(w in str(c.get("name","")).lower() for w in ("research","draw","ball","search","switch","orders","retrieval","vessel")),
+                  str(c.get("name",""))))
+              for c in fallback:
+                  nm=re.sub(r"[^a-z0-9]+"," ",str(c.get("name","")).lower()).strip()
+                  if nm in used_names: continue
+                  trainers.append(c); used_names.add(nm)
+                  if len(trainers)==4: break
+
+          deck=[]
+          for c in pokemon: deck.extend([int(c["cardId"])]*4)
+          for c in trainers: deck.extend([int(c["cardId"])]*4)
+          energy_count=60-len(deck)
+          deck.extend([int(energy["cardId"])]*energy_count)
+          if len(deck)!=60:
+              print("STOP: deck is not exactly 60 cards:",len(deck))
+              raise SystemExit(23)
+          counts=collections.Counter(deck)
+          energy_id=int(energy["cardId"])
+          illegal=[(card_id,n) for card_id,n in counts.items() if card_id!=energy_id and n>4]
+          if illegal:
+              print("STOP: copy-limit validation failed:",json.dumps(illegal))
+              raise SystemExit(24)
+          if not any(card_map[cid].get("basic") is True for cid in deck if cid in card_map):
+              print("STOP: deck has no Basic Pokémon.")
+              raise SystemExit(25)
+          if any(card_map[cid].get("aceSpec") is True for cid in deck if cid in card_map):
+              print("STOP: deck includes an ACE SPEC card.")
+              raise SystemExit(26)
+
+          summary = {
+              "energyType":energy_type,
+              "pokemon":[{"id":int(c["cardId"]),"name":c.get("name"),"hp":c.get("hp"),
+                  "score":round(s,1),"attackIds":c.get("attacks",[])} for s,c in chosen],
+              "trainers":[{"id":int(c["cardId"]),"name":c.get("name")} for c in trainers],
+              "energy":{"id":energy_id,"name":energy.get("name"),"count":energy_count},
+              "deckCount":len(deck)
+          }
+          print("=== LEGAL DECK BUILT FROM LIVE CATALOG ===")
+          print(json.dumps(summary,indent=2))
+          Path("assets").mkdir(parents=True,exist_ok=True)
+          Path("manifest.json").write_text(json.dumps({
+              "schemaVersion":1,"gameType":"PokemonTcg","runtime":"python3.11",
+              "entrypoint":"harness/strategy.py","joinPayload":deck
+          },separators=(",",":")),encoding="utf-8")
+          Path("assets/card_catalog.json").write_text(json.dumps({"cards":cards,"attacks":attacks},separators=(",",":")),encoding="utf-8")
+          zip_path="tcg-playground-s4-bundle.zip"
+          with zipfile.ZipFile(zip_path,"w",zipfile.ZIP_DEFLATED) as z:
+              z.write("manifest.json","manifest.json")
+              z.write("harness/strategy.py","harness/strategy.py")
+              z.write("assets/card_catalog.json","assets/card_catalog.json")
+
+          # Follow the official mode-detection instruction: try owner-hosted join ONCE.
+          join_status, join_data, join_raw = request("/tcg/join","POST",{"competitionId":CID,"joinPayload":deck})
+          join_code = str(join_data.get("error") or join_data.get("code") or "") if isinstance(join_data,dict) else ""
+          join_msg = str(join_data.get("message") or join_data.get("error") or "") if isinstance(join_data,dict) else str(join_data)
+          print("OWNER_HOSTED_JOIN_PROBE:",json.dumps({"httpStatus":join_status,"code":join_code,"message":join_msg[:300]}))
+          if join_status == 403 and ("engine_bundle_required" in (join_code+" "+join_msg).lower()):
+              print("MODE: hosted bundle required; proceeding with the published bundle submission route.")
+          elif 200 <= join_status < 300 and isinstance(join_data,dict) and join_data.get("status") in ("queued","matched"):
+              print("MODE: owner-hosted join accepted; no bundle submission will be made.")
+              spec=importlib.util.spec_from_file_location("devfun_tcg_strategy", "harness/strategy.py")
+              strategy=importlib.util.module_from_spec(spec); spec.loader.exec_module(strategy)
+              match_id=join_data.get("matchId")
+              started=time.time(); actions=0; last_status=join_data.get("status"); terminal=None
+              while time.time()-started < 600 and actions < 600:
+                  status, data, raw=request("/tcg/pending-actions?competitionId="+CID)
+                  if status!=200:
+                      print("OWNER_HOSTED_ACTION_LOOP_ERROR:",json.dumps({"httpStatus":status,"details":str(data)[:300]}))
+                      raise SystemExit(30)
+                  pending=data.get("pending",[]) if isinstance(data,dict) else []
+                  matches=data.get("activeMatches",[]) if isinstance(data,dict) else []
+                  if not match_id and matches and isinstance(matches,list):
+                      match_id=matches[0].get("matchId") or matches[0].get("id")
+                  for item in pending if isinstance(pending,list) else []:
+                      current_id=item.get("matchId")
+                      if match_id and current_id and current_id!=match_id:
+                          continue
+                      match_id=current_id or match_id
+                      ctx={"observation":item.get("obs") or item.get("observation") or {},
+                           "legalActions":item.get("legalActions") or []}
+                      response=str(strategy.act(ctx).get("action","[0]"))
+                      st, result, raw2=request("/tcg/action","POST",{"matchId":match_id,"seq":item.get("seq"),"action":response})
+                      actions+=1
+                      if st not in (200,201):
+                          print("OWNER_HOSTED_ACTION_REJECTED:",json.dumps({"httpStatus":st,"details":str(result)[:300]}))
+                          raise SystemExit(31)
+                      if isinstance(result,dict):
+                          terminal=result.get("matchStatus")
+                      if terminal in ("Settled","Aborted"):
+                          print("OWNER_HOSTED_MATCH_FINISHED:",json.dumps({"matchId":match_id,"matchStatus":terminal,"decisions":actions}))
+                          raise SystemExit(0)
+                  time.sleep(0.75)
+              print("OWNER_HOSTED_JOIN_ACCEPTED_BUT_MATCH_NOT_SETTLED_WITHIN_WINDOW:",
+                    json.dumps({"matchId":match_id,"status":last_status,"decisions":actions}))
+              raise SystemExit(32)
+          else:
+              # Do not fall through on other errors: the guide only authorizes switching
+              # modes for the explicit engine_bundle_required response.
+              print("STOP: Owner-hosted probe did not return engine_bundle_required or a valid join response.")
+              print("No hosted-bundle submission was attempted.")
+              raise SystemExit(33)
+
+          # Hosted bundle submission. The season was rechecked immediately above.
+          boundary="----DevFunBoundary"+secrets.token_hex(16)
+          bundle=Path(zip_path).read_bytes()
+          fields = [
+              ("competitionId", CID.encode()),
+              ("template", b"engine-agent")
+          ]
+          body=bytearray()
+          for name,value in fields:
+              body.extend(("--"+boundary+"\r\n").encode())
+              body.extend((f'Content-Disposition: form-data; name="{name}"\r\n\r\n').encode())
+              body.extend(value); body.extend(b"\r\n")
+          body.extend(("--"+boundary+"\r\n").encode())
+          body.extend(b'Content-Disposition: form-data; name="bundle"; filename="bundle.zip"\r\n')
+          body.extend(b"Content-Type: application/zip\r\n\r\n")
+          body.extend(bundle); body.extend(b"\r\n")
+          body.extend(("--"+boundary+"--\r\n").encode())
+          upload_headers={"Accept":"application/json","Content-Type":"multipart/form-data; boundary="+boundary,
+                          "x-arena-api-key":KEY}
+          submit_status, submit_data, submit_raw=request("/submissions","POST",None,extra_headers=upload_headers)
+          # request() doesn't accept raw multipart, so issue the upload request explicitly.
+          req=urllib.request.Request(BASE+"/submissions",data=bytes(body),headers=upload_headers,method="POST")
+          try:
+              with urllib.request.urlopen(req,timeout=90) as response:
+                  submit_status=response.status
+                  submit_raw=response.read()
+          except urllib.error.HTTPError as e:
+              submit_status=e.code; submit_raw=e.read()
+          try: submit_data=json.loads(submit_raw)
+          except Exception: submit_data={"message":submit_raw.decode("utf-8","replace")[:2000]}
+          if submit_status not in (200,201,202):
+              # Always read and inspect the response body; never retry a pending submission.
+              safe={k:v for k,v in submit_data.items() if k not in ("apiKey","token","claimToken","secret")} if isinstance(submit_data,dict) else str(submit_data)[:1000]
+              print("HOSTED_BUNDLE_SUBMISSION_REJECTED:",json.dumps({"httpStatus":submit_status,"response":safe},indent=2))
+              raise SystemExit(34)
+          submission_id=(submit_data.get("submissionId") or submit_data.get("id") or
+              (submit_data.get("data") or {}).get("id") if isinstance(submit_data.get("data"),dict) else None)
+          if not submission_id:
+              print("HOSTED_BUNDLE_SUBMISSION_RESPONSE_WITHOUT_ID:",
+                    json.dumps({k:v for k,v in submit_data.items() if k not in ("apiKey","token","claimToken","secret")},indent=2)[:3000])
+              raise SystemExit(35)
+          print("HOSTED_BUNDLE_ACCEPTED:",json.dumps({"submissionId":submission_id,"status":submit_data.get("status"),
+              "competitionId":CID,"bundleBytes":len(bundle)}))
+          current=None
+          for attempt in range(24):
+              st, current, raw=request("/submissions/"+str(submission_id))
+              if st!=200:
+                  print("SUBMISSION_STATUS_POLL_ERROR:",json.dumps({"httpStatus":st,"response":str(current)[:300]}))
+                  raise SystemExit(36)
+              status=str(current.get("status") or "").lower() if isinstance(current,dict) else ""
+              print("SUBMISSION_STATUS:",json.dumps({"attempt":attempt+1,"status":current.get("status"),
+                  "id":current.get("id") or current.get("submissionId"),
+                  "matchesPlayed":current.get("matchesPlayed"),
+                  "engine":current.get("engine") if isinstance(current.get("engine"),dict) else None}))
+              if status == "active":
+                  print("ENTRY_COMPLETE_ACTIVE")
+                  raise SystemExit(0)
+              if status == "failed":
+                  print("ENTRY_FAILED_DETAIL:",json.dumps({k:v for k,v in current.items() if k not in ("apiKey","token","claimToken","secret")},indent=2)[:5000])
+                  raise SystemExit(37)
+              time.sleep(5)
+          print("ENTRY_ACCEPTED_BUT_STILL_PROVISIONING:",json.dumps({"submissionId":submission_id,
+              "lastStatus":current.get("status") if isinstance(current,dict) else None}))
+          PY
