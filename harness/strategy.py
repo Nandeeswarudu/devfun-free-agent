@@ -330,12 +330,25 @@ def _groq_pick(legal_strings, observation, select, options):
         with urllib.request.urlopen(request, timeout=25) as response:
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
+        try:
+            raw_error = exc.read().decode("utf-8", "replace")
+            error_payload = json.loads(raw_error) if raw_error else {}
+        except Exception:
+            error_payload = {}
+        error_data = error_payload.get("error", {}) if isinstance(error_payload, dict) else {}
+        error_code = str(error_data.get("code") or "") if isinstance(error_data, dict) else ""
+        error_message = str(error_data.get("message") or error_payload.get("message") or "no response message") if isinstance(error_payload, dict) else "no response message"
+        # Defensive redaction: never echo a key if a proxy unexpectedly includes it.
+        error_message = error_message.replace(api_key, "[REDACTED]")[:220]
         if exc.code == 429:
             _groq_warn_once("RATE_LIMIT", "Groq returned HTTP 429; falling back to local strategy.")
-        elif exc.code in (401, 403):
-            _groq_warn_once("AUTH_OR_ACCESS", f"Groq returned HTTP {exc.code}; check the secret and model access.")
+        elif exc.code == 403:
+            detail = f" ({error_code})" if error_code else ""
+            _groq_warn_once("AUTH_OR_ACCESS", f"Groq returned HTTP 403{detail}: {error_message}. Check project/org model permissions; using local strategy.")
+        elif exc.code == 401:
+            _groq_warn_once("AUTH_OR_ACCESS", f"Groq returned HTTP 401: {error_message}. Check that GROQ_API_KEY is valid; using local strategy.")
         else:
-            _groq_warn_once("HTTP_ERROR", f"Groq returned HTTP {exc.code}; falling back to local strategy.")
+            _groq_warn_once("HTTP_ERROR", f"Groq returned HTTP {exc.code}: {error_message}; falling back to local strategy.")
         return None
     except Exception as exc:
         _groq_warn_once("REQUEST_ERROR", f"Groq request failed ({type(exc).__name__}); falling back to local strategy.")
