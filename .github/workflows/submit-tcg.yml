@@ -38,6 +38,7 @@ jobs:
           ARENA_API_KEY: ${{ secrets.ARENA_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GROQ_MODEL: openai/gpt-oss-20b
+          GROQ_ENABLED: false
           BATCH_MATCHES: ${{ github.event.inputs.match_count || '5' }}
         run: |
           python - <<'PY'
