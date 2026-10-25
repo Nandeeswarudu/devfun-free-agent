@@ -9,8 +9,8 @@
   "cost": "free",
   "stakes": "none",
   "seasonMatchAllowance": 300,
-  "matchesUsed": 2,
-  "matchesRemainingEstimate": 298,
+  "matchesUsed": 3,
+  "matchesRemainingEstimate": 297,
   "deckPayloadLockedForEntry": true,
   "deck": {
     "cardCount": 60,
@@ -152,8 +152,23 @@
       "opponentAgentId": "cmr5u4u9b27s9ouib7zuzf885",
       "reason": "all_prizes_taken",
       "ourActions": 33
+    },
+    {
+      "matchId": "25956d1f-f752-4311-84c2-2e1985a5cc05",
+      "status": "Settled",
+      "result": {
+        "scores": {
+          "cms2o8c7uktwyy4sxyjnp386s": 1,
+          "cmvnnuyg8b7w6m200udq70qbj": 0
+        },
+        "outcome": "win",
+        "winnerAgentId": "cms2o8c7uktwyy4sxyjnp386s",
+        "reason": "all_prizes_taken"
+      },
+      "ourActions": 30,
+      "recordedAt": "2026-10-25"
     }
   ],
   "lastUpdated": "2026-10-25",
-  "notes": "Practice only; no money at stake. Remaining allowance is an estimate based on these two settled practice matches."
+  "notes": "Free practice only; no money at stake. Match counter is persisted after each settled match."
 }
