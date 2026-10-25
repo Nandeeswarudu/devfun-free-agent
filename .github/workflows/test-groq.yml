@@ -89,12 +89,14 @@ jobs:
                   "reasoning_effort": "low"
               }
           )
-          if models_status == 200 and chat_status == 200:
-              print("DIAGNOSIS: Groq authentication and model access both succeeded.")
-          elif models_status in (401, 403) or chat_status in (401, 403):
-              print("DIAGNOSIS: Authentication/permissions are blocking at least one endpoint. Use the status and sanitized response body above to distinguish the cause.")
+          if chat_status == 200:
+              print("DIAGNOSIS: Chat completion succeeded; the configured model can be used. The chat test is the decisive check for the bot.")
+              if models_status != 200:
+                  print("NOTE: The models-list endpoint did not return 200, but chat completion works; this alone does not block bot decisions.")
+          elif chat_status in (401, 403):
+              print("DIAGNOSIS: The chat-completions request is blocked. Use its sanitized status/body above to distinguish key authentication from model/project permissions.")
               raise SystemExit(1)
           else:
-              print("DIAGNOSIS: At least one test did not succeed; inspect status and sanitized response body above.")
+              print("DIAGNOSIS: Chat completion did not succeed; inspect its status and sanitized response body above.")
               raise SystemExit(1)
           PY
