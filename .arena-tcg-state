@@ -1,0 +1,159 @@
+{
+  "competitionName": "[TCG] Playground S4",
+  "arenaSlug": "tcg-playground",
+  "competitionId": "cmvmddsux8tt6ymnx3teo78ie",
+  "season": 4,
+  "entryMode": "owner-hosted",
+  "entryStatus": "Active",
+  "entryAccepted": true,
+  "cost": "free",
+  "stakes": "none",
+  "seasonMatchAllowance": 300,
+  "matchesUsed": 2,
+  "matchesRemainingEstimate": 298,
+  "deckPayloadLockedForEntry": true,
+  "deck": {
+    "cardCount": 60,
+    "pokemon": [
+      {
+        "cardId": 695,
+        "name": "Mega Mawile ex",
+        "copies": 4
+      },
+      {
+        "cardId": 756,
+        "name": "Mega Kangaskhan ex",
+        "copies": 4
+      },
+      {
+        "cardId": 44,
+        "name": "Bloodmoon Ursaluna ex",
+        "copies": 4
+      },
+      {
+        "cardId": 299,
+        "name": "Hop’s Zacian ex",
+        "copies": 4
+      },
+      {
+        "cardId": 336,
+        "name": "Zacian ex",
+        "copies": 4
+      },
+      {
+        "cardId": 547,
+        "name": "Genesect ex",
+        "copies": 4
+      }
+    ],
+    "trainers": [
+      {
+        "cardId": 1121,
+        "name": "Ultra Ball",
+        "copies": 4
+      },
+      {
+        "cardId": 1116,
+        "name": "Energy Switch",
+        "copies": 4
+      },
+      {
+        "cardId": 1118,
+        "name": "Energy Retrieval",
+        "copies": 4
+      },
+      {
+        "cardId": 1086,
+        "name": "Buddy-Buddy Poffin",
+        "copies": 4
+      }
+    ],
+    "energy": {
+      "cardId": 8,
+      "name": "Basic {M} Energy",
+      "copies": 20
+    },
+    "joinPayload": [
+      695,
+      695,
+      695,
+      695,
+      756,
+      756,
+      756,
+      756,
+      44,
+      44,
+      44,
+      44,
+      299,
+      299,
+      299,
+      299,
+      336,
+      336,
+      336,
+      336,
+      547,
+      547,
+      547,
+      547,
+      1121,
+      1121,
+      1121,
+      1121,
+      1116,
+      1116,
+      1116,
+      1116,
+      1118,
+      1118,
+      1118,
+      1118,
+      1086,
+      1086,
+      1086,
+      1086,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8
+    ]
+  },
+  "matches": [
+    {
+      "matchId": "2950b773-c8c9-412d-9336-63ffbeb917a4",
+      "status": "Settled",
+      "outcomeForNanduAI": "loss",
+      "opponent": "Ironclad",
+      "reason": "no_active_pokemon",
+      "totalActions": 96
+    },
+    {
+      "matchId": "974753e2-73f7-4dc6-8a3d-5b18e3a0e611",
+      "status": "Settled",
+      "outcomeForNanduAI": "loss",
+      "opponentAgentId": "cmr5u4u9b27s9ouib7zuzf885",
+      "reason": "all_prizes_taken",
+      "ourActions": 33
+    }
+  ],
+  "lastUpdated": "2026-10-25",
+  "notes": "Practice only; no money at stake. Remaining allowance is an estimate based on these two settled practice matches."
+}
