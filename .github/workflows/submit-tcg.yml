@@ -364,98 +364,98 @@ jobs:
               matches_used += 1
               print("PERSISTED_MATCH_COUNT:", json.dumps({"used": matches_used, "remaining": max(0, 300 - matches_used)}))
 
-              bundle_fallback = False
-              for batch_index in range(batch_count):
-                  print("STARTING_PRACTICE_MATCH:", json.dumps({"matchNumberInRun": batch_index + 1, "batchSize": batch_count}))
-                  # Follow the official mode-detection instruction: owner-hosted join is attempted once per match.
+          bundle_fallback = False
+          for batch_index in range(batch_count):
+              print("STARTING_PRACTICE_MATCH:", json.dumps({"matchNumberInRun": batch_index + 1, "batchSize": batch_count}))
+              # Follow the official mode-detection instruction: owner-hosted join is attempted once per match.
               join_status, join_data, join_raw = request("/tcg/join","POST",{"competitionId":CID,"joinPayload":deck})
-              join_code = str(join_data.get("error") or join_data.get("code") or "") if isinstance(join_data,dict) else ""
-              join_msg = str(join_data.get("message") or join_data.get("error") or "") if isinstance(join_data,dict) else str(join_data)
-              print("OWNER_HOSTED_JOIN_PROBE:",json.dumps({"httpStatus":join_status,"code":join_code,"message":join_msg[:300]}))
-              if join_status == 403 and ("engine_bundle_required" in (join_code+" "+join_msg).lower()):
-                  print("MODE: hosted bundle required; proceeding with the published bundle submission route.")
-                  bundle_fallback = True
-                  break
-              elif 200 <= join_status < 300 and isinstance(join_data,dict) and join_data.get("status") in ("queued","matched"):
-                  print("MODE: owner-hosted join accepted; no bundle submission will be made.")
-                  spec=importlib.util.spec_from_file_location("devfun_tcg_strategy", "harness/strategy.py")
-                  strategy=importlib.util.module_from_spec(spec); spec.loader.exec_module(strategy)
-                  match_id=join_data.get("matchId")
-                  started=time.time(); actions=0; last_status=join_data.get("status"); terminal=None
-                  saw_active=False
-                  match_finished=False
-                  while time.time()-started < 600 and actions < 600:
-                      status, data, raw=request("/tcg/pending-actions?competitionId="+CID)
-                      if status!=200:
-                          print("OWNER_HOSTED_ACTION_LOOP_ERROR:",json.dumps({"httpStatus":status,"details":str(data)[:300]}))
-                          raise SystemExit(30)
-                      pending=data.get("pending",[]) if isinstance(data,dict) else []
-                      matches=data.get("activeMatches",[]) if isinstance(data,dict) else []
-                      if not match_id and matches and isinstance(matches,list):
-                          match_id=matches[0].get("matchId") or matches[0].get("id")
-                      active_ids={m.get("matchId") or m.get("id") for m in matches if isinstance(m,dict)}
-                      pending_ids={p.get("matchId") for p in pending if isinstance(p,dict)}
-                      if match_id and match_id in active_ids:
-                          saw_active=True
-                      elif match_id and saw_active and match_id not in pending_ids:
-                          # An opponent's final move may settle the match without our action
-                          # response carrying matchStatus. Check the authoritative public battle.
-                          battle_status, battle, _ = request("/tcg/battle/"+str(match_id), auth=False)
-                          if battle_status==200 and isinstance(battle,dict) and battle.get("status") in ("Settled","Aborted"):
-                              terminal=battle.get("status")
-                              persist_settled_match(match_id, actions, terminal, battle.get("result"))
-                              print("OWNER_HOSTED_MATCH_FINISHED:",json.dumps({
-                                  "matchId":match_id,"matchStatus":terminal,"decisions":actions,
-                                  "result":battle.get("result")},default=str))
-                              match_finished=True
-                              break
-                      for item in pending if isinstance(pending,list) else []:
-                          current_id=item.get("matchId")
-                          if match_id and current_id and current_id!=match_id:
-                              continue
-                          match_id=current_id or match_id
-                          ctx={"observation":item.get("obs") or item.get("observation") or {},
-                               "legalActions":item.get("legalActions") or []}
-                          response=str(strategy.act(ctx).get("action","[0]"))
-                          st, result, raw2=request("/tcg/action","POST",{"matchId":match_id,"seq":item.get("seq"),"action":response})
-                          actions+=1
-                          if st not in (200,201):
-                              # If the game ended between the GET and POST, verify its terminal
-                              # status before treating it as a strategy error.
+                  join_code = str(join_data.get("error") or join_data.get("code") or "") if isinstance(join_data,dict) else ""
+                  join_msg = str(join_data.get("message") or join_data.get("error") or "") if isinstance(join_data,dict) else str(join_data)
+                  print("OWNER_HOSTED_JOIN_PROBE:",json.dumps({"httpStatus":join_status,"code":join_code,"message":join_msg[:300]}))
+                  if join_status == 403 and ("engine_bundle_required" in (join_code+" "+join_msg).lower()):
+                      print("MODE: hosted bundle required; proceeding with the published bundle submission route.")
+                      bundle_fallback = True
+                      break
+                  elif 200 <= join_status < 300 and isinstance(join_data,dict) and join_data.get("status") in ("queued","matched"):
+                      print("MODE: owner-hosted join accepted; no bundle submission will be made.")
+                      spec=importlib.util.spec_from_file_location("devfun_tcg_strategy", "harness/strategy.py")
+                      strategy=importlib.util.module_from_spec(spec); spec.loader.exec_module(strategy)
+                      match_id=join_data.get("matchId")
+                      started=time.time(); actions=0; last_status=join_data.get("status"); terminal=None
+                      saw_active=False
+                      match_finished=False
+                      while time.time()-started < 600 and actions < 600:
+                          status, data, raw=request("/tcg/pending-actions?competitionId="+CID)
+                          if status!=200:
+                              print("OWNER_HOSTED_ACTION_LOOP_ERROR:",json.dumps({"httpStatus":status,"details":str(data)[:300]}))
+                              raise SystemExit(30)
+                          pending=data.get("pending",[]) if isinstance(data,dict) else []
+                          matches=data.get("activeMatches",[]) if isinstance(data,dict) else []
+                          if not match_id and matches and isinstance(matches,list):
+                              match_id=matches[0].get("matchId") or matches[0].get("id")
+                          active_ids={m.get("matchId") or m.get("id") for m in matches if isinstance(m,dict)}
+                          pending_ids={p.get("matchId") for p in pending if isinstance(p,dict)}
+                          if match_id and match_id in active_ids:
+                              saw_active=True
+                          elif match_id and saw_active and match_id not in pending_ids:
+                              # An opponent's final move may settle the match without our action
+                              # response carrying matchStatus. Check the authoritative public battle.
                               battle_status, battle, _ = request("/tcg/battle/"+str(match_id), auth=False)
                               if battle_status==200 and isinstance(battle,dict) and battle.get("status") in ("Settled","Aborted"):
-                                  persist_settled_match(match_id, actions, battle.get("status"), battle.get("result"))
+                                  terminal=battle.get("status")
+                                  persist_settled_match(match_id, actions, terminal, battle.get("result"))
                                   print("OWNER_HOSTED_MATCH_FINISHED:",json.dumps({
-                                      "matchId":match_id,"matchStatus":battle.get("status"),"decisions":actions,
+                                      "matchId":match_id,"matchStatus":terminal,"decisions":actions,
                                       "result":battle.get("result")},default=str))
                                   match_finished=True
                                   break
-                              print("OWNER_HOSTED_ACTION_REJECTED:",json.dumps({"httpStatus":st,"details":str(result)[:300]}))
-                              raise SystemExit(31)
-                          if isinstance(result,dict):
-                              terminal=result.get("matchStatus")
-                          if terminal in ("Settled","Aborted"):
-                              battle_status, battle, _ = request("/tcg/battle/"+str(match_id), auth=False)
-                              match_result=battle.get("result") if battle_status==200 and isinstance(battle,dict) else None
-                              persist_settled_match(match_id, actions, terminal, match_result)
-                              print("OWNER_HOSTED_MATCH_FINISHED:",json.dumps({
-                                  "matchId":match_id,"matchStatus":terminal,"decisions":actions,
-                                  "result":match_result},default=str))
-                              match_finished=True
+                          for item in pending if isinstance(pending,list) else []:
+                              current_id=item.get("matchId")
+                              if match_id and current_id and current_id!=match_id:
+                                  continue
+                              match_id=current_id or match_id
+                              ctx={"observation":item.get("obs") or item.get("observation") or {},
+                                   "legalActions":item.get("legalActions") or []}
+                              response=str(strategy.act(ctx).get("action","[0]"))
+                              st, result, raw2=request("/tcg/action","POST",{"matchId":match_id,"seq":item.get("seq"),"action":response})
+                              actions+=1
+                              if st not in (200,201):
+                                  # If the game ended between the GET and POST, verify its terminal
+                                  # status before treating it as a strategy error.
+                                  battle_status, battle, _ = request("/tcg/battle/"+str(match_id), auth=False)
+                                  if battle_status==200 and isinstance(battle,dict) and battle.get("status") in ("Settled","Aborted"):
+                                      persist_settled_match(match_id, actions, battle.get("status"), battle.get("result"))
+                                      print("OWNER_HOSTED_MATCH_FINISHED:",json.dumps({
+                                          "matchId":match_id,"matchStatus":battle.get("status"),"decisions":actions,
+                                          "result":battle.get("result")},default=str))
+                                      match_finished=True
+                                      break
+                                  print("OWNER_HOSTED_ACTION_REJECTED:",json.dumps({"httpStatus":st,"details":str(result)[:300]}))
+                                  raise SystemExit(31)
+                              if isinstance(result,dict):
+                                  terminal=result.get("matchStatus")
+                              if terminal in ("Settled","Aborted"):
+                                  battle_status, battle, _ = request("/tcg/battle/"+str(match_id), auth=False)
+                                  match_result=battle.get("result") if battle_status==200 and isinstance(battle,dict) else None
+                                  persist_settled_match(match_id, actions, terminal, match_result)
+                                  print("OWNER_HOSTED_MATCH_FINISHED:",json.dumps({
+                                      "matchId":match_id,"matchStatus":terminal,"decisions":actions,
+                                      "result":match_result},default=str))
+                                  match_finished=True
+                                  break
+                          if match_finished:
                               break
-                      if match_finished:
-                          break
-                      time.sleep(0.75)
-                  if not match_finished:
-                      print("OWNER_HOSTED_JOIN_ACCEPTED_BUT_MATCH_NOT_SETTLED_WITHIN_WINDOW:",
-                            json.dumps({"matchId":match_id,"status":last_status,"decisions":actions}))
-                      raise SystemExit(32)
-              else:
-                  # Do not fall through on other errors: the guide only authorizes switching
-                  # modes for the explicit engine_bundle_required response.
-                  print("STOP: Owner-hosted probe did not return engine_bundle_required or a valid join response.")
-                  print("No hosted-bundle submission was attempted.")
-                  raise SystemExit(33)
+                          time.sleep(0.75)
+                      if not match_finished:
+                          print("OWNER_HOSTED_JOIN_ACCEPTED_BUT_MATCH_NOT_SETTLED_WITHIN_WINDOW:",
+                                json.dumps({"matchId":match_id,"status":last_status,"decisions":actions}))
+                          raise SystemExit(32)
+                  else:
+                      # Do not fall through on other errors: the guide only authorizes switching
+                      # modes for the explicit engine_bundle_required response.
+                      print("STOP: Owner-hosted probe did not return engine_bundle_required or a valid join response.")
+                      print("No hosted-bundle submission was attempted.")
+                      raise SystemExit(33)
 
           if bundle_fallback:
               print("BUNDLE_MODE_FALLBACK: batch runner is not used for bundle-engine mode; using the existing one-submission fallback.")
