@@ -1,4 +1,4 @@
-name: Inspect DevFun TCG match status
+name: Inspect DevFun TCG match result
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Read result of first practice match
+      - name: Summarize settled practice match
         run: |
           python - <<'PY'
           import json, urllib.request, urllib.error
@@ -27,14 +27,18 @@ jobs:
                       except Exception: return r.status,raw.decode("utf-8","replace")[:1200]
               except urllib.error.HTTPError as e:
                   return e.code,e.read().decode("utf-8","replace")[:800]
-              except Exception as e:
-                  return 0,{"error":type(e).__name__}
-          ihs,ih=get("/__introspection")
-          if isinstance(ih,dict):
-              paths=[{"path":e.get("path"),"method":e.get("method"),"auth":e.get("auth")}
-                for e in ih.get("endpoints",[]) if "/tcg/battle" in e.get("path","").lower() or "/tcg/matches" in e.get("path","").lower()]
-              print("AUTHORITATIVE_MATCH_ROUTES:",json.dumps(paths,indent=2))
-          for path in ["/tcg/battle/"+MID,"/tcg/battle/"+MID+"/decisions","/tcg/matches?competitionId=cmvmddsux8tt6ymnx3teo78ie"]:
-              st,data=get(path)
-              print("RESULT:",json.dumps({"path":path,"status":st,"data":data},indent=2)[:12000])
+          st,b=get("/tcg/battle/"+MID)
+          if not isinstance(b,dict):
+              print("MATCH_RESPONSE:",st,str(b)[:2000]); raise SystemExit(0)
+          summary={k:v for k,v in b.items() if k not in ("actions","seed")}
+          summary["actionCount"]=len(b.get("actions",[])) if isinstance(b.get("actions"),list) else None
+          summary["lastActions"]=b.get("actions",[])[-8:] if isinstance(b.get("actions"),list) else []
+          print("MATCH_SUMMARY:",json.dumps(summary,indent=2)[:10000])
+          st,d=get("/tcg/battle/"+MID+"/decisions")
+          if isinstance(d,dict):
+              points=d.get("decisionPoints",[])
+              latest=points[-1] if points else None
+              print("DECISION_SUMMARY:",json.dumps({"httpStatus":st,"status":d.get("status"),
+                "decisionPointCount":len(points),"latestSeq":latest.get("seq") if isinstance(latest,dict) else None,
+                "latestKeys":sorted(latest.keys()) if isinstance(latest,dict) else []},indent=2))
           PY
