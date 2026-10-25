@@ -258,7 +258,7 @@ def _compact_option(option):
 
 
 def _groq_pick(legal_strings, observation, select, options):
-    global _GROQ_CALLS_THIS_MATCH, _GROQ_LAST_CALL_AT
+    global _GROQ_CALLS_THIS_MATCH, _GROQ_LAST_CALL_AT, _GROQ_DISABLED_FOR_PROCESS
     if os.environ.get("GROQ_ENABLED", "true").strip().lower() not in ("1", "true", "yes", "on"):
         _groq_warn_once("TEMPORARILY_DISABLED", "Groq calls are disabled pending resolution of Cloudflare Error 1010; using local strategy.")
         return None
@@ -341,7 +341,6 @@ def _groq_pick(legal_strings, observation, select, options):
             error_payload = json.loads(raw_error) if raw_error else {}
         except Exception:
             error_payload = {}
-        global _GROQ_DISABLED_FOR_PROCESS
         error_data = error_payload.get("error", {}) if isinstance(error_payload, dict) else {}
         error_code = str(error_data.get("code") or "") if isinstance(error_data, dict) else ""
         error_message = str(error_data.get("message") or error_payload.get("message") or error_payload.get("detail") or error_payload.get("title") or "no response message") if isinstance(error_payload, dict) else "no response message"
