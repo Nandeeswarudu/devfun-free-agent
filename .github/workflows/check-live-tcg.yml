@@ -55,6 +55,16 @@ jobs:
                                   "legalActionCount":len(p.get("legalActions",[]))}
                                  for p in pending if isinstance(p,dict)] if isinstance(pending,list) else [],
                       "activeMatches":matches},indent=2)[:7000])
+                  for match in matches if isinstance(matches,list) else []:
+                      mid = (match.get("matchId") or match.get("id")) if isinstance(match,dict) else None
+                      if not mid: continue
+                      battle_status, battle = get("/tcg/battle/" + str(mid))
+                      if battle_status == 200 and isinstance(battle,dict):
+                          print("MATCH_SUMMARY:", json.dumps({"matchId":mid,"status":battle.get("status"),
+                              "result":battle.get("result"),
+                              "actionCount":len(battle.get("actions",[])) if isinstance(battle.get("actions"),list) else None,
+                              "players":[{"name":p.get("name"),"handle":p.get("handle"),"side":p.get("side")}
+                                         for p in battle.get("players",[]) if isinstance(p,dict)]}, indent=2))
               else:
                   print(json.dumps(data,indent=2)[:1500])
           PY
