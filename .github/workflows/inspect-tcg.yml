@@ -1,4 +1,4 @@
-name: Inspect DevFun TCG entry guide (read-only)
+name: Inspect DevFun TCG match status endpoints
 
 on:
   push:
@@ -12,36 +12,38 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Inspect top candidate attacks and hosted-bundle API
+      - name: List authoritative TCG match routes and check settled match
         run: |
           python - <<'PY'
-          import json, urllib.request
+          import json, urllib.request, urllib.error
           BASE="https://arena.dev.fun/api/arena"
           CID="cmvmddsux8tt6ymnx3teo78ie"
-          def get(path):
-              req=urllib.request.Request(BASE+path,headers={"Accept":"application/json"})
-              with urllib.request.urlopen(req,timeout=30) as r: return json.load(r)
-          ih=get("/__introspection")
-          print("=== ENDPOINT PATHS ===")
-          print(json.dumps([{"path":e.get("path"),"method":e.get("method"),"auth":e.get("auth")}
-              for e in ih.get("endpoints",[]) if any(w in e.get("path","").lower() for w in ("tcg","submission"))],indent=2))
-          cards=get("/tcg/cards?competitionId="+CID)
-          items=cards.get("cards",cards.get("data",[])) if isinstance(cards,dict) else cards
-          fight=sorted([c for c in items if c.get("hp",0)>0 and c.get("basic") is True and c.get("energyType")==6],
-                       key=lambda c:c.get("hp",0),reverse=True)
-          chosen=fight[:30]
-          ids=set()
-          for c in chosen:
-              ids.update(a for a in c.get("attacks",[]) if isinstance(a,int))
-          attacks=get("/tcg/attacks?competitionId="+CID)
-          if isinstance(attacks,dict):
-              attacks=attacks.get("attacks",attacks.get("data",[]))
-          print("=== ATTACK DETAILS FOR CANDIDATES ===")
-          found=[a for a in attacks if isinstance(a,dict) and a.get("attackId") in ids] if isinstance(attacks,list) else []
-          print(json.dumps(found,indent=2)[:12000])
-          print("=== TOP BASIC FIGHTING CARDS + ATTACKS ===")
-          amap={a.get("attackId"):a for a in found}
-          print(json.dumps([{"cardId":c.get("cardId"),"name":c.get("name"),"hp":c.get("hp"),
-             "retreatCost":c.get("retreatCost"),"attacks":[amap.get(i) for i in c.get("attacks",[])],
-             "ex":c.get("ex")} for c in chosen[:20]],indent=2)[:18000])
+          MID="2950b773-c8c9-412d-9336-63ffbeb917a4"
+          def get(url):
+              req=urllib.request.Request(url,headers={"Accept":"application/json"})
+              try:
+                  with urllib.request.urlopen(req,timeout=20) as r:
+                      raw=r.read()
+                      try: return r.status,json.loads(raw)
+                      except Exception: return r.status,raw.decode("utf-8","replace")[:1000]
+              except urllib.error.HTTPError as e:
+                  return e.code,e.read().decode("utf-8","replace")[:500]
+              except Exception as e:
+                  return 0,{"error":type(e).__name__}
+          status, ih=get(BASE+"/__introspection")
+          print("INTROSPECTION_STATUS:",status)
+          if isinstance(ih,dict):
+              paths=[{"path":e.get("path"),"method":e.get("method"),"auth":e.get("auth")}
+                for e in ih.get("endpoints",[]) if any(w in e.get("path","").lower() for w in ("tcg","match","submission"))]
+              print("MATCH_RELATED_ROUTES:",json.dumps(paths,indent=2)[:12000])
+          for path in [
+              "/tcg/matches/"+MID,
+              "/tcg/match/"+MID,
+              "/tcg/matches?competitionId="+CID,
+              "/tcg/match?matchId="+MID,
+              "/tcg/history?competitionId="+CID,
+              "/matches/"+MID,
+          ]:
+              st,data=get(BASE+path)
+              print("ROUTE_CHECK:",json.dumps({"path":path,"status":st,"data":data if not isinstance(data,(dict,list)) else data},indent=2)[:2000])
           PY
