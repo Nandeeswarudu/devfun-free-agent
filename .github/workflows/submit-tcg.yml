@@ -36,6 +36,8 @@ jobs:
       - name: Verify eligibility, build legal deck, and join free practice
         env:
           ARENA_API_KEY: ${{ secrets.ARENA_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: openai/gpt-oss-20b
           BATCH_MATCHES: ${{ github.event.inputs.match_count || '5' }}
         run: |
           python - <<'PY'
@@ -364,6 +366,10 @@ jobs:
               matches_used += 1
               print("PERSISTED_MATCH_COUNT:", json.dumps({"used": matches_used, "remaining": max(0, 300 - matches_used)}))
 
+          spec=importlib.util.spec_from_file_location("devfun_tcg_strategy", "harness/strategy.py")
+          strategy=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(strategy)
+
           bundle_fallback = False
           for batch_index in range(batch_count):
               print("STARTING_PRACTICE_MATCH:", json.dumps({"matchNumberInRun": batch_index + 1, "batchSize": batch_count}))
@@ -378,8 +384,7 @@ jobs:
                   break
               elif 200 <= join_status < 300 and isinstance(join_data,dict) and join_data.get("status") in ("queued","matched"):
                   print("MODE: owner-hosted join accepted; no bundle submission will be made.")
-                  spec=importlib.util.spec_from_file_location("devfun_tcg_strategy", "harness/strategy.py")
-                  strategy=importlib.util.module_from_spec(spec); spec.loader.exec_module(strategy)
+                  strategy.start_new_match()
                   match_id=join_data.get("matchId")
                   started=time.time(); actions=0; last_status=join_data.get("status"); terminal=None
                   saw_active=False
