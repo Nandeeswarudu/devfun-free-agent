@@ -15,6 +15,9 @@ jobs:
       - name: Check out strategy
         uses: actions/checkout@v4
 
+      - name: Validate strategy syntax
+        run: python -m py_compile harness/strategy.py
+
       - name: Verify eligibility, build legal deck, and join free practice
         env:
           ARENA_API_KEY: ${{ secrets.ARENA_API_KEY }}
