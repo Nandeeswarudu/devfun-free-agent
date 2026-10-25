@@ -12,60 +12,36 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Verify exact season, card IDs and submission API
-        env:
-          ARENA_API_KEY: ${{ secrets.ARENA_API_KEY }}
+      - name: Inspect top candidate attacks and hosted-bundle API
         run: |
           python - <<'PY'
-          import json, urllib.request, urllib.error, collections, os
-
+          import json, urllib.request
           BASE="https://arena.dev.fun/api/arena"
           CID="cmvmddsux8tt6ymnx3teo78ie"
-          def get(path, auth=False):
-              h={"Accept":"application/json"}
-              if auth and os.environ.get("ARENA_API_KEY"):
-                  h["x-arena-api-key"]=os.environ["ARENA_API_KEY"].strip()
-              req=urllib.request.Request(BASE+path,headers=h)
-              try:
-                  with urllib.request.urlopen(req,timeout=30) as r: return json.load(r)
-              except urllib.error.HTTPError as e:
-                  return {"httpError":e.code,"path":path,"body":e.read().decode("utf-8","replace")[:500]}
-              except Exception as e: return {"error":type(e).__name__,"path":path}
-          
-          detail=get("/competition?competitionId="+CID)
-          print("=== EXACT SEASON ===")
-          print(json.dumps({k:detail.get(k) for k in ("id","name","status","seasonNumber","gameType","admissionMode","executionMode","rules","creditsMode","cost","terms") if k in detail},indent=2))
-          
+          def get(path):
+              req=urllib.request.Request(BASE+path,headers={"Accept":"application/json"})
+              with urllib.request.urlopen(req,timeout=30) as r: return json.load(r)
           ih=get("/__introspection")
-          print("=== API PATH INDEX ===")
-          if isinstance(ih,dict):
-              print(json.dumps([{"path":e.get("path"),"method":e.get("method"),"auth":e.get("auth"),"description":e.get("description","")[:110]}
-                 for e in ih.get("endpoints",[]) if any(w in e.get("path","").lower() for w in ("tcg","submission","competition"))],indent=2)[:9000])
-
+          print("=== ENDPOINT PATHS ===")
+          print(json.dumps([{"path":e.get("path"),"method":e.get("method"),"auth":e.get("auth")}
+              for e in ih.get("endpoints",[]) if any(w in e.get("path","").lower() for w in ("tcg","submission"))],indent=2))
           cards=get("/tcg/cards?competitionId="+CID)
           items=cards.get("cards",cards.get("data",[])) if isinstance(cards,dict) else cards
-          print("=== BEST BASIC FIGHTING CANDIDATES ===")
-          if isinstance(items,list):
-              fighting=sorted([c for c in items if c.get("hp",0)>0 and c.get("basic") is True and c.get("energyType")==6],
-                              key=lambda c:c.get("hp",0),reverse=True)
-              print(json.dumps([{"cardId":c.get("cardId"),"name":c.get("name"),"hp":c.get("hp"),"energyType":c.get("energyType"),
-                  "type":c.get("pokemonType"),"retreatCost":c.get("retreatCost"),"attacks":c.get("attacks"),"ex":c.get("ex"),
-                  "aceSpec":c.get("aceSpec")} for c in fighting[:50]],indent=2)[:10000])
-              print("pokemonCount:",len([c for c in items if c.get("hp",0)>0]),"fightingBasicCount:",len(fighting))
-          else: print(json.dumps(cards)[:1000])
-
-          for path in ["/tcg/attacks?competitionId="+CID,
-                       "/tcg/attacks?ids=1525,1526",
-                       "/tcg/attacks/1525",
-                       "/tcg/attack?attackId=1525"]:
-              print("=== TEST "+path+" ===")
-              print(json.dumps(get(path),indent=2)[:2500])
-
-          print("=== CURRENT SUBMISSIONS FOR THIS SEASON ===")
-          sub=get("/agent/submissions?competitionId="+CID+"&limit=20",auth=True)
-          if isinstance(sub,dict):
-              print(json.dumps({"total":sub.get("total"),"data":[{"id":x.get("id"),"status":x.get("status"),
-                  "submittedAt":x.get("submittedAt"),"dataTemplate":(x.get("data") or {}).get("template") if isinstance(x.get("data"),dict) else None}
-                  for x in sub.get("data",[]) if isinstance(x,dict)]},indent=2)[:5000])
-          else: print(json.dumps(sub)[:1000])
+          fight=sorted([c for c in items if c.get("hp",0)>0 and c.get("basic") is True and c.get("energyType")==6],
+                       key=lambda c:c.get("hp",0),reverse=True)
+          chosen=fight[:30]
+          ids=set()
+          for c in chosen:
+              ids.update(a for a in c.get("attacks",[]) if isinstance(a,int))
+          attacks=get("/tcg/attacks?competitionId="+CID)
+          if isinstance(attacks,dict):
+              attacks=attacks.get("attacks",attacks.get("data",[]))
+          print("=== ATTACK DETAILS FOR CANDIDATES ===")
+          found=[a for a in attacks if isinstance(a,dict) and a.get("attackId") in ids] if isinstance(attacks,list) else []
+          print(json.dumps(found,indent=2)[:12000])
+          print("=== TOP BASIC FIGHTING CARDS + ATTACKS ===")
+          amap={a.get("attackId"):a for a in found}
+          print(json.dumps([{"cardId":c.get("cardId"),"name":c.get("name"),"hp":c.get("hp"),
+             "retreatCost":c.get("retreatCost"),"attacks":[amap.get(i) for i in c.get("attacks",[])],
+             "ex":c.get("ex")} for c in chosen[:20]],indent=2)[:18000])
           PY
