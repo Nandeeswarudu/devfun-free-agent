@@ -1,4 +1,4 @@
-name: Inspect DevFun TCG match result
+name: Inspect DevFun TCG strategy decisions
 
 on:
   push:
@@ -12,33 +12,33 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Summarize settled practice match
+      - name: Summarize Nandu AI decisions in settled practice match
         run: |
           python - <<'PY'
           import json, urllib.request, urllib.error
           BASE="https://arena.dev.fun/api/arena"
           MID="2950b773-c8c9-412d-9336-63ffbeb917a4"
+          OUR="cmvnnuyg8b7w6m200udq70qbj"
           def get(path):
               req=urllib.request.Request(BASE+path,headers={"Accept":"application/json"})
-              try:
-                  with urllib.request.urlopen(req,timeout=25) as r:
-                      raw=r.read()
-                      try: return r.status,json.loads(raw)
-                      except Exception: return r.status,raw.decode("utf-8","replace")[:1200]
-              except urllib.error.HTTPError as e:
-                  return e.code,e.read().decode("utf-8","replace")[:800]
-          st,b=get("/tcg/battle/"+MID)
-          if not isinstance(b,dict):
-              print("MATCH_RESPONSE:",st,str(b)[:2000]); raise SystemExit(0)
-          summary={k:v for k,v in b.items() if k not in ("actions","seed")}
-          summary["actionCount"]=len(b.get("actions",[])) if isinstance(b.get("actions"),list) else None
-          summary["lastActions"]=b.get("actions",[])[-8:] if isinstance(b.get("actions"),list) else []
-          print("MATCH_SUMMARY:",json.dumps(summary,indent=2)[:10000])
-          st,d=get("/tcg/battle/"+MID+"/decisions")
-          if isinstance(d,dict):
-              points=d.get("decisionPoints",[])
-              latest=points[-1] if points else None
-              print("DECISION_SUMMARY:",json.dumps({"httpStatus":st,"status":d.get("status"),
-                "decisionPointCount":len(points),"latestSeq":latest.get("seq") if isinstance(latest,dict) else None,
-                "latestKeys":sorted(latest.keys()) if isinstance(latest,dict) else []},indent=2))
+              with urllib.request.urlopen(req,timeout=30) as r: return json.load(r)
+          battle=get("/tcg/battle/"+MID)
+          decisions=get("/tcg/battle/"+MID+"/decisions")
+          actions={a.get("seq"):a for a in battle.get("actions",[]) if a.get("agentId")==OUR}
+          points=[]
+          for p in decisions.get("decisionPoints",[]):
+              pp=(p.get("perPlayer") or {}).get(OUR)
+              if not isinstance(pp,dict): continue
+              obs=pp.get("obs") or {}
+              sel=obs.get("select") or {}
+              options=sel.get("option") or []
+              action=actions.get(p.get("seq"),{}).get("action")
+              if p.get("seq") in list(actions.keys())[:16] or p.get("seq") in list(actions.keys())[-12:]:
+                  points.append({"seq":p.get("seq"),"action":action,"turn":(obs.get("current") or {}).get("turn"),
+                    "selectType":sel.get("type"),"context":sel.get("context"),"contextCard":sel.get("contextCard"),
+                    "legalActions":pp.get("legalActions"),"options":options[:12]})
+          print("MATCH_STATUS:",battle.get("status"))
+          print("RESULT:",json.dumps(battle.get("result"),indent=2))
+          print("TOTAL_ACTIONS:",len(battle.get("actions",[])))
+          print("OUR_DECISIONS:",json.dumps(points,indent=2)[:18000])
           PY
