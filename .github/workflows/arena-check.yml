@@ -1,0 +1,40 @@
+
+name: DevFun Free Agent Check
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check active competitions
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          base = "https://arena.dev.fun/api/arena"
+
+          def get(path):
+              req = urllib.request.Request(base + path)
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  return json.load(r)
+
+          data = get("/competition/list-active")
+          print("Active competition response:")
+          print(json.dumps(data, indent=2)[:12000])
+
+          if not os.getenv("GROQ_API_KEY"):
+              print("GROQ_API_KEY is not configured yet.")
+          else:
+              print("Groq key is configured (value hidden).")
+          PY
