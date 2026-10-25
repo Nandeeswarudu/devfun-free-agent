@@ -221,6 +221,7 @@ _GROQ_MIN_INTERVAL_SECONDS = 8.0
 _GROQ_CALLS_THIS_MATCH = 0
 _GROQ_LAST_CALL_AT = 0.0
 _GROQ_WARNED = set()
+_GROQ_DISABLED_FOR_PROCESS = False
 
 
 def start_new_match():
@@ -258,6 +259,11 @@ def _compact_option(option):
 
 def _groq_pick(legal_strings, observation, select, options):
     global _GROQ_CALLS_THIS_MATCH, _GROQ_LAST_CALL_AT
+    if os.environ.get("GROQ_ENABLED", "true").strip().lower() not in ("1", "true", "yes", "on"):
+        _groq_warn_once("TEMPORARILY_DISABLED", "Groq calls are disabled pending resolution of Cloudflare Error 1010; using local strategy.")
+        return None
+    if _GROQ_DISABLED_FOR_PROCESS:
+        return None
     api_key = os.environ.get("GROQ_API_KEY", "").strip()
     if not api_key:
         _groq_warn_once("KEY_MISSING", "GROQ_API_KEY is not passed to this workflow; using local strategy.")
@@ -335,18 +341,30 @@ def _groq_pick(legal_strings, observation, select, options):
             error_payload = json.loads(raw_error) if raw_error else {}
         except Exception:
             error_payload = {}
+        global _GROQ_DISABLED_FOR_PROCESS
         error_data = error_payload.get("error", {}) if isinstance(error_payload, dict) else {}
         error_code = str(error_data.get("code") or "") if isinstance(error_data, dict) else ""
-        error_message = str(error_data.get("message") or error_payload.get("message") or "no response message") if isinstance(error_payload, dict) else "no response message"
+        error_message = str(error_data.get("message") or error_payload.get("message") or error_payload.get("detail") or error_payload.get("title") or "no response message") if isinstance(error_payload, dict) else "no response message"
+        error_name = str(error_payload.get("error_name") or "") if isinstance(error_payload, dict) else ""
+        ray_id = str(error_payload.get("ray_id") or error_payload.get("instance") or "") if isinstance(error_payload, dict) else ""
+        cf_code = error_payload.get("error_code") if isinstance(error_payload, dict) else None
         # Defensive redaction: never echo a key if a proxy unexpectedly includes it.
         error_message = error_message.replace(api_key, "[REDACTED]")[:220]
         if exc.code == 429:
             _groq_warn_once("RATE_LIMIT", "Groq returned HTTP 429; falling back to local strategy.")
         elif exc.code == 403:
-            detail = f" ({error_code})" if error_code else ""
-            _groq_warn_once("AUTH_OR_ACCESS", f"Groq returned HTTP 403{detail}: {error_message}. Check project/org model permissions; using local strategy.")
+            # Treat a forbidden response as non-retryable during this run.
+            _GROQ_DISABLED_FOR_PROCESS = True
+            if cf_code == 1010 or error_name == "browser_signature_banned":
+                ray_part = f"; ray_id={ray_id}" if ray_id else ""
+                _groq_warn_once("CLOUDFLARE_BLOCK", f"Cloudflare Error 1010 browser_signature_banned{ray_part}; stop retries and contact Groq support. Using local strategy for the rest of this run.")
+            else:
+                detail = f" ({error_code})" if error_code else ""
+                ray_part = f"; ray_id={ray_id}" if ray_id else ""
+                _groq_warn_once("AUTH_OR_ACCESS", f"Groq returned HTTP 403{detail}: {error_message}{ray_part}. Disabled further Groq calls for this run; using local strategy.")
         elif exc.code == 401:
-            _groq_warn_once("AUTH_OR_ACCESS", f"Groq returned HTTP 401: {error_message}. Check that GROQ_API_KEY is valid; using local strategy.")
+            _GROQ_DISABLED_FOR_PROCESS = True
+            _groq_warn_once("AUTH_OR_ACCESS", f"Groq returned HTTP 401: {error_message}. Disabled further Groq calls for this run; check that GROQ_API_KEY is valid.")
         else:
             _groq_warn_once("HTTP_ERROR", f"Groq returned HTTP {exc.code}: {error_message}; falling back to local strategy.")
         return None
