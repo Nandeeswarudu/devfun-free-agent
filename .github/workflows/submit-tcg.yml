@@ -355,8 +355,7 @@ jobs:
           body.extend(("--"+boundary+"--\r\n").encode())
           upload_headers={"Accept":"application/json","Content-Type":"multipart/form-data; boundary="+boundary,
                           "x-arena-api-key":KEY}
-          submit_status, submit_data, submit_raw=request("/submissions","POST",None,extra_headers=upload_headers)
-          # request() doesn't accept raw multipart, so issue the upload request explicitly.
+          # Send the multipart body exactly once; never make an empty preliminary POST.
           req=urllib.request.Request(BASE+"/submissions",data=bytes(body),headers=upload_headers,method="POST")
           try:
               with urllib.request.urlopen(req,timeout=90) as response:
@@ -371,8 +370,9 @@ jobs:
               safe={k:v for k,v in submit_data.items() if k not in ("apiKey","token","claimToken","secret")} if isinstance(submit_data,dict) else str(submit_data)[:1000]
               print("HOSTED_BUNDLE_SUBMISSION_REJECTED:",json.dumps({"httpStatus":submit_status,"response":safe},indent=2))
               raise SystemExit(34)
-          submission_id=(submit_data.get("submissionId") or submit_data.get("id") or
-              (submit_data.get("data") or {}).get("id") if isinstance(submit_data.get("data"),dict) else None)
+          submission_id = submit_data.get("submissionId") or submit_data.get("id") if isinstance(submit_data,dict) else None
+          if not submission_id and isinstance(submit_data,dict) and isinstance(submit_data.get("data"),dict):
+              submission_id = submit_data["data"].get("id") or submit_data["data"].get("submissionId")
           if not submission_id:
               print("HOSTED_BUNDLE_SUBMISSION_RESPONSE_WITHOUT_ID:",
                     json.dumps({k:v for k,v in submit_data.items() if k not in ("apiKey","token","claimToken","secret")},indent=2)[:3000])
