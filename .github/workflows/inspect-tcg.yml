@@ -12,50 +12,59 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch current Arena guide, schemas and season metadata
-        env:
-          ARENA_API_KEY: ${{ secrets.ARENA_API_KEY }}
+      - name: Verify current season, rules, costs and legal deck cards
         run: |
           python - <<'PY'
-          import json, urllib.request, urllib.error
+          import json, urllib.request, urllib.error, collections
 
-          BASE = "https://arena.dev.fun"
+          BASE = "https://arena.dev.fun/api/arena"
           CID = "cmvmddsux8tt6ymnx3teo78ie"
-          def read(url, headers=None):
-              req = urllib.request.Request(url, headers=headers or {"Accept":"application/json"})
+          def get(path):
+              req = urllib.request.Request(BASE + path, headers={"Accept":"application/json"})
               try:
                   with urllib.request.urlopen(req, timeout=30) as r:
-                      raw = r.read()
-                      typ = r.headers.get("Content-Type","")
-                      if "json" in typ or raw[:1] in (b"{",b"["):
-                          return json.loads(raw)
-                      return raw.decode("utf-8", "replace")
-              except Exception as e:
-                  return {"error": type(e).__name__, "message": str(e)[:250], "url": url}
+                      return json.load(r)
+              except urllib.error.HTTPError as e:
+                  return {"httpError":e.code,"path":path,"body":e.read().decode("utf-8","replace")[:1000]}
 
-          for url in [
-              BASE + "/skills/arena.md",
-              BASE + "/skills/tcg-playground.md",
-              BASE + "/api/arena/__introspection",
-              BASE + "/api/arena/competition/list-active",
-              BASE + "/api/arena/competitions",
-              BASE + "/api/arena/competition",
-              BASE + "/api/arena/tcg/competition?competitionId=" + CID,
-              BASE + "/api/arena/tcg/cards?competitionId=" + CID,
-          ]:
-              print("\n===== " + url + " =====")
-              data = read(url)
-              if "introspection" in url and isinstance(data, dict):
-                  endpoints = data.get("endpoints", [])
-                  filtered = [e for e in endpoints if any(w in e.get("path","").lower() for w in
-                              ("tcg","competition","submission","season","entry","agent/me"))]
-                  print(json.dumps({"baseUrl":data.get("baseUrl"),"name":data.get("name"),
-                                    "endpoints":filtered}, indent=2)[:22000])
-              elif "tcg/cards" in url and isinstance(data, (dict,list)):
-                  cards = data.get("cards", data.get("data", [])) if isinstance(data,dict) else data
-                  print(json.dumps({"cardCount":len(cards),"sample":cards[:3]}, indent=2)[:4000])
-              elif isinstance(data, str):
-                  print(data[:16000])
-              else:
-                  print(json.dumps(data, indent=2)[:14000])
+          active = get("/competition/list-active")
+          print("=== ACTIVE COMPETITION EXACT MATCH ===")
+          matches = [x for x in active if x.get("id")==CID] if isinstance(active,list) else []
+          print(json.dumps(matches, indent=2))
+          detail = get("/competition?competitionId="+CID)
+          print("=== COMPETITION DETAIL (rules, execution, cost terms) ===")
+          print(json.dumps(detail, indent=2)[:14000])
+
+          introspection = get("/__introspection")
+          if isinstance(introspection,dict):
+              relevant = [e for e in introspection.get("endpoints",[]) if any(x in e.get("path","").lower() for x in ("tcg","submission","competition"))]
+              print("=== RELEVANT API ENDPOINTS ===")
+              print(json.dumps(relevant,indent=2)[:18000])
+
+          cards = get("/tcg/cards?competitionId="+CID)
+          items = cards.get("cards",cards.get("data",[])) if isinstance(cards,dict) else cards
+          print("=== CARD CATALOG SUMMARY ===")
+          if not isinstance(items,list):
+              print(json.dumps(cards)[:2000])
+              raise SystemExit(0)
+          print("count:",len(items))
+          print("types:",json.dumps(collections.Counter(str(c.get("cardType")) for c in items)))
+          print("basic flags:",json.dumps(collections.Counter(str(c.get("basic")) for c in items)))
+          def atk_summary(c):
+              a=c.get("attacks",[])
+              out=[]
+              for x in a[:3] if isinstance(a,list) else []:
+                  if isinstance(x,dict):
+                      out.append({k:x.get(k) for k in ("name","damage","cost","energyCost","description") if k in x})
+                  else: out.append(x)
+              return out
+          mons=[c for c in items if c.get("hp",0)>0]
+          candidates=sorted(mons,key=lambda c:(bool(c.get("basic")),c.get("hp",0)),reverse=True)
+          print("top high-HP pokemon (filtered fields):")
+          print(json.dumps([{"cardId":c.get("cardId"),"name":c.get("name"),"cardType":c.get("cardType"),
+                             "basic":c.get("basic"),"hp":c.get("hp"),"pokemonType":c.get("pokemonType"),
+                             "energyType":c.get("energyType"),"retreatCost":c.get("retreatCost"),
+                             "evolvesFrom":c.get("evolvesFrom"),"stage1":c.get("stage1"),"stage2":c.get("stage2"),
+                             "ex":c.get("ex"),"aceSpec":c.get("aceSpec"),"attacks":atk_summary(c)}
+                            for c in candidates[:100]],indent=2)[:20000])
           PY
