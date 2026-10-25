@@ -118,6 +118,7 @@ def _option_score(option, select, observation):
             attack_candidates.append(ATTACKS[iv])
 
     score = 0.0
+    discard_context = ("discard" in ctx or "discard" in blob or "choose cards to discard" in ctx)
     # Attack choices: prefer high damage and low energy cost, with a light penalty
     # for attacks whose text imposes a large self-cost.
     for attack in attack_candidates:
@@ -139,12 +140,12 @@ def _option_score(option, select, observation):
         card_score = _card_power(card)
         name = str(card.get("name") or "")
         card_score += _name_score(name)
-        if "discard" in ctx or "discard" in blob or "choose cards to discard" in ctx:
+        if discard_context:
             card_score = -card_score
-        if any(word in ctx for word in ("energy", "attach", "power up")):
+        if any(word in ctx for word in ("energy", "attach", "power up")) and not discard_context:
             # The selection is likely an energy destination; favor an efficient attacker.
             card_score += 20.0
-        score = max(score, card_score)
+        score = min(score, card_score) if discard_context else max(score, card_score)
 
     # Handle options with their own state fields (usually in-play Pokémon targets).
     if isinstance(option, dict):
