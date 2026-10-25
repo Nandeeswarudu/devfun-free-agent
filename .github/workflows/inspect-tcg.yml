@@ -1,4 +1,4 @@
-name: Inspect DevFun TCG strategy decisions
+name: Inspect DevFun TCG hand options
 
 on:
   push:
@@ -12,10 +12,10 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Summarize Nandu AI decisions in settled practice match
+      - name: Inspect representative decision observations
         run: |
           python - <<'PY'
-          import json, urllib.request, urllib.error
+          import json, urllib.request
           BASE="https://arena.dev.fun/api/arena"
           MID="2950b773-c8c9-412d-9336-63ffbeb917a4"
           OUR="cmvnnuyg8b7w6m200udq70qbj"
@@ -23,22 +23,26 @@ jobs:
               req=urllib.request.Request(BASE+path,headers={"Accept":"application/json"})
               with urllib.request.urlopen(req,timeout=30) as r: return json.load(r)
           battle=get("/tcg/battle/"+MID)
-          decisions=get("/tcg/battle/"+MID+"/decisions")
           actions={a.get("seq"):a for a in battle.get("actions",[]) if a.get("agentId")==OUR}
-          points=[]
-          for p in decisions.get("decisionPoints",[]):
+          dec=get("/tcg/battle/"+MID+"/decisions")
+          out=[]
+          wanted={2,15,16,17,19,20,23,24,33,34,35,36,42,43,46,47,54,55,58,59,60,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95}
+          for p in dec.get("decisionPoints",[]):
+              if p.get("seq") not in wanted: continue
               pp=(p.get("perPlayer") or {}).get(OUR)
               if not isinstance(pp,dict): continue
               obs=pp.get("obs") or {}
+              cur=obs.get("current") or {}
+              yi=cur.get("yourIndex",1)
+              players=cur.get("players") or []
+              me=players[yi] if isinstance(players,list) and yi<len(players) else {}
               sel=obs.get("select") or {}
-              options=sel.get("option") or []
-              action=actions.get(p.get("seq"),{}).get("action")
-              if p.get("seq") in list(actions.keys())[:16] or p.get("seq") in list(actions.keys())[-12:]:
-                  points.append({"seq":p.get("seq"),"action":action,"turn":(obs.get("current") or {}).get("turn"),
-                    "selectType":sel.get("type"),"context":sel.get("context"),"contextCard":sel.get("contextCard"),
-                    "legalActions":pp.get("legalActions"),"options":options[:12]})
-          print("MATCH_STATUS:",battle.get("status"))
-          print("RESULT:",json.dumps(battle.get("result"),indent=2))
-          print("TOTAL_ACTIONS:",len(battle.get("actions",[])))
-          print("OUR_DECISIONS:",json.dumps(points,indent=2)[:18000])
+              out.append({"seq":p.get("seq"),"turn":cur.get("turn"),"result":cur.get("result"),
+                "action":actions.get(p.get("seq"),{}).get("action"),
+                "active":me.get("active"),"bench":me.get("bench"),"hand":me.get("hand"),
+                "handCount":me.get("handCount"),"deckCount":me.get("deckCount"),"prizes":me.get("prize"),
+                "selectionType":sel.get("type"),"context":sel.get("context"),
+                "options":sel.get("option"),"legalActions":pp.get("legalActions")})
+          print("MATCH_RESULT:",json.dumps(battle.get("result")))
+          print("OBSERVATIONS:",json.dumps(out,indent=2)[:24000])
           PY
