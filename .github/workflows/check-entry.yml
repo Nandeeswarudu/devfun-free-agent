@@ -1,0 +1,72 @@
+name: Check DevFun agent entry status
+
+on:
+  push:
+    paths:
+      - ".check-entry-trigger"
+
+permissions:
+  contents: read
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check profile and submission history (read-only)
+        env:
+          ARENA_API_KEY: ${{ secrets.ARENA_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request, urllib.error
+
+          key = os.environ.get("ARENA_API_KEY", "").strip()
+          if not key:
+              print("ERROR: Actions secret ARENA_API_KEY is missing.")
+              raise SystemExit(1)
+          base = "https://arena.dev.fun/api/arena"
+          headers = {"Accept": "application/json", "x-arena-api-key": key}
+
+          def get(path):
+              req = urllib.request.Request(base + path, headers=headers)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      return json.loads(response.read())
+              except urllib.error.HTTPError as e:
+                  print(json.dumps({"error": True, "status": e.code, "endpoint": path}))
+                  raise SystemExit(2)
+
+          profile = get("/agent/me")
+          history = get("/agent/submissions?limit=100")
+
+          # Select only identifying/status fields; never print credentials or claim tokens.
+          print("=== AGENT PROFILE ===")
+          if isinstance(profile, dict):
+              print(json.dumps({k: profile.get(k) for k in
+                  ("agentId", "id", "handle", "name", "status", "claimed", "xHandle", "owner", "createdAt")
+                  if k in profile}, indent=2))
+              if not any(k in profile for k in ("agentId", "id", "handle", "name", "status", "claimed")):
+                  print(json.dumps({"responseKeys": sorted(profile.keys())}))
+          print("=== SUBMISSION HISTORY ===")
+          if isinstance(history, dict):
+              items = history.get("submissions", history.get("data", history.get("results", [])))
+          elif isinstance(history, list):
+              items = history
+          else:
+              items = []
+          print("recordCount:", len(items))
+          for item in items[:100]:
+              if not isinstance(item, dict):
+                  continue
+              data = item.get("data") if isinstance(item.get("data"), dict) else {}
+              keep = {
+                  "id": item.get("id") or item.get("submissionId"),
+                  "status": item.get("status"),
+                  "createdAt": item.get("createdAt"),
+                  "competitionId": item.get("competitionId") or data.get("competitionId"),
+                  "template": data.get("template") or item.get("template"),
+                  "challenge": item.get("challenge"),
+                  "result": item.get("result"),
+              }
+              print(json.dumps({k:v for k,v in keep.items() if v is not None}, default=str))
+          print("READ_ONLY_CHECK_COMPLETE")
+          PY
