@@ -69,8 +69,11 @@ jobs:
           def get(path, auth=True):
               status, data, raw = request(path, auth=auth)
               if status != 200:
-                  print(json.dumps({"readError":True,"status":status,"path":path,
-                      "response": {k:v for k,v in data.items() if k not in ("apiKey","claimToken","token","secret")} if isinstance(data,dict) else str(data)[:500}}))
+                  if isinstance(data, dict):
+                      safe_response = {k:v for k,v in data.items() if k not in ("apiKey","claimToken","token","secret")}
+                  else:
+                      safe_response = str(data)[:500]
+                  print(json.dumps({"readError": True, "status": status, "path": path, "response": safe_response}))
                   raise SystemExit(11)
               return data
 
