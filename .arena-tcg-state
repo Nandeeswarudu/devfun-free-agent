@@ -9,8 +9,8 @@
   "cost": "free",
   "stakes": "none",
   "seasonMatchAllowance": 300,
-  "matchesUsed": 3,
-  "matchesRemainingEstimate": 297,
+  "matchesUsed": 4,
+  "matchesRemainingEstimate": 296,
   "deckPayloadLockedForEntry": true,
   "deck": {
     "cardCount": 60,
@@ -166,6 +166,21 @@
         "reason": "all_prizes_taken"
       },
       "ourActions": 30,
+      "recordedAt": "2026-10-25"
+    },
+    {
+      "matchId": "2b535deb-c5d3-4d68-8810-bafe5463dae2",
+      "status": "Settled",
+      "result": {
+        "scores": {
+          "cmr945onwe5voyguwjodwzs9g": 0,
+          "cmvnnuyg8b7w6m200udq70qbj": 1
+        },
+        "outcome": "win",
+        "winnerAgentId": "cmvnnuyg8b7w6m200udq70qbj",
+        "reason": "all_prizes_taken"
+      },
+      "ourActions": 45,
       "recordedAt": "2026-10-25"
     }
   ],
