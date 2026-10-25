@@ -1,0 +1,61 @@
+name: Inspect DevFun TCG entry guide (read-only)
+
+on:
+  push:
+    paths:
+      - ".inspect-tcg-trigger"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch current Arena guide, schemas and season metadata
+        env:
+          ARENA_API_KEY: ${{ secrets.ARENA_API_KEY }}
+        run: |
+          python - <<'PY'
+          import json, urllib.request, urllib.error
+
+          BASE = "https://arena.dev.fun"
+          CID = "cmvmddsux8tt6ymnx3teo78ie"
+          def read(url, headers=None):
+              req = urllib.request.Request(url, headers=headers or {"Accept":"application/json"})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      raw = r.read()
+                      typ = r.headers.get("Content-Type","")
+                      if "json" in typ or raw[:1] in (b"{",b"["):
+                          return json.loads(raw)
+                      return raw.decode("utf-8", "replace")
+              except Exception as e:
+                  return {"error": type(e).__name__, "message": str(e)[:250], "url": url}
+
+          for url in [
+              BASE + "/skills/arena.md",
+              BASE + "/skills/tcg-playground.md",
+              BASE + "/api/arena/__introspection",
+              BASE + "/api/arena/competition/list-active",
+              BASE + "/api/arena/competitions",
+              BASE + "/api/arena/competition",
+              BASE + "/api/arena/tcg/competition?competitionId=" + CID,
+              BASE + "/api/arena/tcg/cards?competitionId=" + CID,
+          ]:
+              print("\n===== " + url + " =====")
+              data = read(url)
+              if "introspection" in url and isinstance(data, dict):
+                  endpoints = data.get("endpoints", [])
+                  filtered = [e for e in endpoints if any(w in e.get("path","").lower() for w in
+                              ("tcg","competition","submission","season","entry","agent/me"))]
+                  print(json.dumps({"baseUrl":data.get("baseUrl"),"name":data.get("name"),
+                                    "endpoints":filtered}, indent=2)[:22000])
+              elif "tcg/cards" in url and isinstance(data, (dict,list)):
+                  cards = data.get("cards", data.get("data", [])) if isinstance(data,dict) else data
+                  print(json.dumps({"cardCount":len(cards),"sample":cards[:3]}, indent=2)[:4000])
+              elif isinstance(data, str):
+                  print(data[:16000])
+              else:
+                  print(json.dumps(data, indent=2)[:14000])
+          PY
