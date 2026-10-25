@@ -9,8 +9,8 @@
   "cost": "free",
   "stakes": "none",
   "seasonMatchAllowance": 300,
-  "matchesUsed": 6,
-  "matchesRemainingEstimate": 294,
+  "matchesUsed": 7,
+  "matchesRemainingEstimate": 293,
   "deckPayloadLockedForEntry": true,
   "deck": {
     "cardCount": 60,
@@ -212,8 +212,16 @@
       },
       "ourActions": 50,
       "recordedAt": "2026-10-25"
+    },
+    {
+      "matchId": "20e4d537-902c-4b22-a558-6dcb281ec527",
+      "status": "terminal; exact status not captured",
+      "result": null,
+      "ourActions": null,
+      "recordedAt": "2026-10-25",
+      "note": "The batch workflow created a local match-state commit after the match reached a terminal status, but its Git push was rejected after main advanced. The final outcome/action count were therefore not present in the emitted logs."
     }
   ],
   "lastUpdated": "2026-10-25",
-  "notes": "Free practice only; no money at stake. Match counter is persisted after each settled match."
+  "notes": "Free practice only; no money at stake. Six matches are fully logged and the seventh terminal match is counted because the workflow's final state push failed; its outcome details were not emitted in logs."
 }
