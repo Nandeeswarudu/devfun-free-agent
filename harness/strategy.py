@@ -119,6 +119,35 @@ def _option_score(option, select, observation):
 
     score = 0.0
     discard_context = ("discard" in ctx or "discard" in blob or "choose cards to discard" in ctx)
+
+    # In the main turn menu, the engine encodes legal moves as option types:
+    # type 7 plays a legal card from hand, type 8 attaches energy to a Pokémon,
+    # type 13 attacks, and type 14 ends the turn. Prefer setup plays before
+    # passing, while still allowing high-value attacks to outrank energy attach.
+    main_menu = str((select or {}).get("type")) == "0" and str((select or {}).get("context")) == "0"
+    option_type = _to_int(option.get("type")) if isinstance(option, dict) else None
+    if main_menu and option_type == 7:
+        score = 180.0
+        # When this runtime exposes our hand, refine card-play priorities by name/ID.
+        current = observation.get("current") if isinstance(observation, dict) else {}
+        your_index = _to_int((current or {}).get("yourIndex")) if isinstance(current, dict) else None
+        players = (current or {}).get("players", []) if isinstance(current, dict) else []
+        hand = players[your_index].get("hand") if isinstance(players, list) and your_index is not None and 0 <= your_index < len(players) and isinstance(players[your_index], dict) else None
+        hand_index = _to_int(option.get("index")) if isinstance(option, dict) else None
+        if isinstance(hand, list) and hand_index is not None and 0 <= hand_index < len(hand):
+            hand_card = hand[hand_index]
+            if isinstance(hand_card, dict):
+                card_id = _to_int(hand_card.get("cardId", hand_card.get("id")))
+                card = CARDS.get(card_id) if card_id is not None else None
+                name = str((card or hand_card).get("name") or "")
+                score += _name_score(name)
+                if card:
+                    score += min(35.0, max(0.0, _card_power(card) * 0.08))
+    elif main_menu and option_type == 8:
+        score = 85.0
+    elif main_menu and option_type == 14:
+        score = -10000.0
+
     # Attack choices: prefer high damage and low energy cost, with a light penalty
     # for attacks whose text imposes a large self-cost.
     for attack in attack_candidates:
