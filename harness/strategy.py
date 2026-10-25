@@ -2,7 +2,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -205,6 +210,152 @@ def _option_score(option, select, observation):
         score += max(0.0, min(10.0, len(option) * 0.02))
     return score
 
+
+
+# Optional Groq-powered decisions. Heuristics remain the safe fallback if the key,
+# model, network, or free-tier quota is unavailable.
+_GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+_GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
+_GROQ_MAX_CALLS_PER_MATCH = 3
+_GROQ_MIN_INTERVAL_SECONDS = 8.0
+_GROQ_CALLS_THIS_MATCH = 0
+_GROQ_LAST_CALL_AT = 0.0
+_GROQ_WARNED = set()
+
+
+def start_new_match():
+    """Reset only the per-match LLM budget; keep the run-wide request pacing."""
+    global _GROQ_CALLS_THIS_MATCH
+    _GROQ_CALLS_THIS_MATCH = 0
+
+
+def _groq_warn_once(code, message):
+    if code not in _GROQ_WARNED:
+        print("GROQ_STRATEGY_" + code + ": " + message, file=sys.stderr, flush=True)
+        _GROQ_WARNED.add(code)
+
+
+def _compact_option(option):
+    if isinstance(option, dict):
+        allow = (
+            "type", "index", "name", "cardId", "pokemonId", "attackId",
+            "targetCardId", "sourceCardId", "text", "damage", "energies",
+            "hp", "maxHp", "max_hp", "context", "label", "id", "value",
+            "playerIndex", "slot", "count"
+        )
+        compact = {}
+        for key in allow:
+            if key in option:
+                value = option[key]
+                if isinstance(value, str) and len(value) > 180:
+                    value = value[:180]
+                compact[key] = value
+        return compact if compact else str(option)[:180]
+    if isinstance(option, str):
+        return option[:180]
+    return option
+
+
+def _groq_pick(legal_strings, observation, select, options):
+    global _GROQ_CALLS_THIS_MATCH, _GROQ_LAST_CALL_AT
+    api_key = os.environ.get("GROQ_API_KEY", "").strip()
+    if not api_key:
+        _groq_warn_once("KEY_MISSING", "GROQ_API_KEY is not passed to this workflow; using local strategy.")
+        return None
+    if _GROQ_CALLS_THIS_MATCH >= _GROQ_MAX_CALLS_PER_MATCH:
+        return None
+    # Skip high-cardinality selections to keep requests compact and avoid omitting legal choices.
+    if len(legal_strings) > 15 or len(options) > 15:
+        return None
+
+    state = {}
+    for key in ("turn", "phase", "current", "players", "yourIndex", "gameState", "board"):
+        if key in observation:
+            state[key] = observation[key]
+    state_text = json.dumps(state, ensure_ascii=False, separators=(",", ":"), default=str)
+    if len(state_text) > 1050:
+        state_text = state_text[:1050] + "…[state truncated]"
+
+    compact_options = [_compact_option(option) for option in options]
+    user_context = {
+        "decision_type": select.get("type"),
+        "decision_context": select.get("context"),
+        "state": state_text,
+        "options_by_index": compact_options,
+        "legal_actions": legal_strings,
+        "instruction": "Choose the strongest legal action for the current Pokemon TCG position."
+    }
+    user_text = json.dumps(user_context, ensure_ascii=False, separators=(",", ":"), default=str)
+    if len(user_text) > 3400:
+        _groq_warn_once("PROMPT_TOO_LARGE", "A decision context was too large; using local strategy for that choice.")
+        return None
+
+    # Stay well below the documented 30 RPM / 8K TPM free-tier limits.
+    wait_for = _GROQ_MIN_INTERVAL_SECONDS - (time.monotonic() - _GROQ_LAST_CALL_AT)
+    if wait_for > 0:
+        time.sleep(wait_for)
+    body = {
+        "model": _GROQ_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a tactical Pokemon TCG agent. Pick exactly one action from legal_actions. "
+                    "Use the state and indexed options; prefer winning lines, developing useful Pokemon, "
+                    "preserving valuable resources, and attacking when advantageous. Never invent an action. "
+                    "Return JSON only in the form {\"action\":\"[2]\"}, where the value is copied exactly "
+                    "from legal_actions. Do not include explanations."
+                )
+            },
+            {"role": "user", "content": user_text}
+        ],
+        "temperature": 0.1,
+        "max_completion_tokens": 100,
+        "reasoning_effort": "low",
+        "response_format": {"type": "json_object"}
+    }
+    request = urllib.request.Request(
+        _GROQ_URL,
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Authorization": "Bearer " + api_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        },
+        method="POST"
+    )
+    _GROQ_LAST_CALL_AT = time.monotonic()
+    _GROQ_CALLS_THIS_MATCH += 1
+    try:
+        with urllib.request.urlopen(request, timeout=25) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            _groq_warn_once("RATE_LIMIT", "Groq returned HTTP 429; falling back to local strategy.")
+        elif exc.code in (401, 403):
+            _groq_warn_once("AUTH_OR_ACCESS", f"Groq returned HTTP {exc.code}; check the secret and model access.")
+        else:
+            _groq_warn_once("HTTP_ERROR", f"Groq returned HTTP {exc.code}; falling back to local strategy.")
+        return None
+    except Exception as exc:
+        _groq_warn_once("REQUEST_ERROR", f"Groq request failed ({type(exc).__name__}); falling back to local strategy.")
+        return None
+
+    try:
+        content = result["choices"][0]["message"]["content"]
+        if isinstance(content, list):
+            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+        parsed = json.loads(str(content).strip())
+        action = str(parsed.get("action", "")).strip()
+        if action in legal_strings:
+            print("GROQ_STRATEGY_USED:", json.dumps({"model": _GROQ_MODEL, "callsThisMatch": _GROQ_CALLS_THIS_MATCH}), flush=True)
+            return action
+        _groq_warn_once("INVALID_ACTION", "The model response was not one of the legal actions; using local strategy.")
+    except Exception:
+        _groq_warn_once("INVALID_RESPONSE", "Could not parse a valid action from Groq; using local strategy.")
+    return None
+
+
 def act(context: dict[str, Any]):
     """Return one legal selection; never raise into the match harness."""
     legal = context.get("legalActions") if isinstance(context, dict) else None
@@ -224,6 +375,11 @@ def act(context: dict[str, Any]):
     if not isinstance(options, list) or not options:
         # The first legal value is a valid fallback and is preferable to a forfeit.
         return {"action": legal_strings[0]}
+
+    # Try a small number of Groq decisions per match; if anything fails, use heuristics.
+    llm_action = _groq_pick(legal_strings, observation, select, options)
+    if llm_action is not None:
+        return {"action": llm_action}
 
     scored = []
     for action in legal_strings:
