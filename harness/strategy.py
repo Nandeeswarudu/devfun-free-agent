@@ -326,7 +326,8 @@ def _groq_pick(legal_strings, observation, select, options):
         headers={
             "Authorization": "Bearer " + api_key,
             "Content-Type": "application/json",
-            "Accept": "application/json"
+            "Accept": "application/json",
+            "User-Agent": "NanduAI/1.0 (Groq API client)"
         },
         method="POST"
     )
