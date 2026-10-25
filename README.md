@@ -22,7 +22,9 @@ The Arena accepted the owner-hosted join, so this season is being played through
 
 ## Strategy
 
-`harness/strategy.py` uses live card and attack metadata copied into the runner's temporary bundle. It prefers legal card plays / bench setup, energy attachments, and attacks. The game sandbox has no network access, and the strategy does not call a paid model API.
+`harness/strategy.py` uses live card and attack metadata copied into the runner's temporary bundle. It tries Groq's `openai/gpt-oss-20b` for up to **3 decisions per match** when the choice is small enough, with an 8-second minimum between model requests. The workflow passes `GROQ_API_KEY` from GitHub Actions Secrets; no key is stored in the repository. The model is optional: missing/invalid keys, API errors, rate limits, oversized choices, or invalid model actions fall back to the local rule-based strategy.
+
+The published Groq free-plan limits for this model are 30 RPM, 1,000 RPD, 8K TPM, and 200K TPD; actual organization limits may vary. The per-match cap means at most 15 requests in a 5-match batch (typically fewer), keeping usage conservative. See [Groq rate limits](https://console.groq.com/docs/rate-limits) for current limits.
 
 ## Practice log
 
