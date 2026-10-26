@@ -212,28 +212,27 @@ def _option_score(option, select, observation):
 
 
 
-# Optional Groq-powered decisions. Heuristics remain the safe fallback if the key,
-# model, network, or free-tier quota is unavailable.
-_GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-_GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
-_GROQ_MAX_CALLS_PER_MATCH = 3
-_GROQ_MIN_INTERVAL_SECONDS = 8.0
-_GROQ_CALLS_THIS_MATCH = 0
-_GROQ_LAST_CALL_AT = 0.0
-_GROQ_WARNED = set()
-_GROQ_DISABLED_FOR_PROCESS = False
+# Optional Mistral-powered decisions. The local heuristic policy remains the safe fallback.
+_MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
+_MISTRAL_MODEL = os.environ.get("MISTRAL_MODEL", "mistral-small-latest")
+_MISTRAL_MAX_CALLS_PER_MATCH = 1
+_MISTRAL_MIN_INTERVAL_SECONDS = 3.0
+_MISTRAL_CALLS_THIS_MATCH = 0
+_MISTRAL_LAST_CALL_AT = 0.0
+_MISTRAL_WARNED = set()
+_MISTRAL_DISABLED_FOR_PROCESS = False
 
 
 def start_new_match():
-    """Reset only the per-match LLM budget; keep the run-wide request pacing."""
-    global _GROQ_CALLS_THIS_MATCH
-    _GROQ_CALLS_THIS_MATCH = 0
+    """Reset the per-match LLM budget; keep run-wide request pacing."""
+    global _MISTRAL_CALLS_THIS_MATCH
+    _MISTRAL_CALLS_THIS_MATCH = 0
 
 
-def _groq_warn_once(code, message):
-    if code not in _GROQ_WARNED:
-        print("GROQ_STRATEGY_" + code + ": " + message, file=sys.stderr, flush=True)
-        _GROQ_WARNED.add(code)
+def _mistral_warn_once(code, message):
+    if code not in _MISTRAL_WARNED:
+        print("MISTRAL_STRATEGY_" + code + ": " + message, file=sys.stderr, flush=True)
+        _MISTRAL_WARNED.add(code)
 
 
 def _compact_option(option):
@@ -257,20 +256,20 @@ def _compact_option(option):
     return option
 
 
-def _groq_pick(legal_strings, observation, select, options):
-    global _GROQ_CALLS_THIS_MATCH, _GROQ_LAST_CALL_AT, _GROQ_DISABLED_FOR_PROCESS
-    if os.environ.get("GROQ_ENABLED", "true").strip().lower() not in ("1", "true", "yes", "on"):
-        _groq_warn_once("TEMPORARILY_DISABLED", "Groq calls are disabled pending resolution of Cloudflare Error 1010; using local strategy.")
+def _mistral_pick(legal_strings, observation, select, options):
+    global _MISTRAL_CALLS_THIS_MATCH, _MISTRAL_LAST_CALL_AT, _MISTRAL_DISABLED_FOR_PROCESS
+    if os.environ.get("MISTRAL_ENABLED", "true").strip().lower() not in ("1", "true", "yes", "on"):
+        _mistral_warn_once("DISABLED", "Mistral calls are disabled by workflow configuration; using local strategy.")
         return None
-    if _GROQ_DISABLED_FOR_PROCESS:
+    if _MISTRAL_DISABLED_FOR_PROCESS:
         return None
-    api_key = os.environ.get("GROQ_API_KEY", "").strip()
+    api_key = os.environ.get("MISTRAL_API_KEY", "").strip()
     if not api_key:
-        _groq_warn_once("KEY_MISSING", "GROQ_API_KEY is not passed to this workflow; using local strategy.")
+        _mistral_warn_once("KEY_MISSING", "MISTRAL_API_KEY is not passed to this workflow; using local strategy.")
         return None
-    if _GROQ_CALLS_THIS_MATCH >= _GROQ_MAX_CALLS_PER_MATCH:
+    if _MISTRAL_CALLS_THIS_MATCH >= _MISTRAL_MAX_CALLS_PER_MATCH:
         return None
-    # Skip high-cardinality selections to keep requests compact and avoid omitting legal choices.
+    # Skip high-cardinality choices so every legal action stays in the prompt.
     if len(legal_strings) > 15 or len(options) > 15:
         return None
 
@@ -282,26 +281,24 @@ def _groq_pick(legal_strings, observation, select, options):
     if len(state_text) > 1050:
         state_text = state_text[:1050] + "…[state truncated]"
 
-    compact_options = [_compact_option(option) for option in options]
     user_context = {
         "decision_type": select.get("type"),
         "decision_context": select.get("context"),
         "state": state_text,
-        "options_by_index": compact_options,
+        "options_by_index": [_compact_option(option) for option in options],
         "legal_actions": legal_strings,
         "instruction": "Choose the strongest legal action for the current Pokemon TCG position."
     }
     user_text = json.dumps(user_context, ensure_ascii=False, separators=(",", ":"), default=str)
     if len(user_text) > 3400:
-        _groq_warn_once("PROMPT_TOO_LARGE", "A decision context was too large; using local strategy for that choice.")
+        _mistral_warn_once("PROMPT_TOO_LARGE", "Decision context was too large; using local strategy for that choice.")
         return None
 
-    # Stay well below the documented 30 RPM / 8K TPM free-tier limits.
-    wait_for = _GROQ_MIN_INTERVAL_SECONDS - (time.monotonic() - _GROQ_LAST_CALL_AT)
+    wait_for = _MISTRAL_MIN_INTERVAL_SECONDS - (time.monotonic() - _MISTRAL_LAST_CALL_AT)
     if wait_for > 0:
         time.sleep(wait_for)
     body = {
-        "model": _GROQ_MODEL,
+        "model": _MISTRAL_MODEL,
         "messages": [
             {
                 "role": "system",
@@ -316,23 +313,22 @@ def _groq_pick(legal_strings, observation, select, options):
             {"role": "user", "content": user_text}
         ],
         "temperature": 0.1,
-        "max_completion_tokens": 100,
-        "reasoning_effort": "low",
+        "max_tokens": 100,
         "response_format": {"type": "json_object"}
     }
     request = urllib.request.Request(
-        _GROQ_URL,
+        _MISTRAL_URL,
         data=json.dumps(body).encode("utf-8"),
         headers={
             "Authorization": "Bearer " + api_key,
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "NanduAI/1.0 (Groq API client)"
+            "User-Agent": "NanduAI/1.0 (Mistral API client)"
         },
         method="POST"
     )
-    _GROQ_LAST_CALL_AT = time.monotonic()
-    _GROQ_CALLS_THIS_MATCH += 1
+    _MISTRAL_LAST_CALL_AT = time.monotonic()
+    _MISTRAL_CALLS_THIS_MATCH += 1
     try:
         with urllib.request.urlopen(request, timeout=25) as response:
             result = json.loads(response.read().decode("utf-8"))
@@ -343,33 +339,23 @@ def _groq_pick(legal_strings, observation, select, options):
         except Exception:
             error_payload = {}
         error_data = error_payload.get("error", {}) if isinstance(error_payload, dict) else {}
-        error_code = str(error_data.get("code") or "") if isinstance(error_data, dict) else ""
-        error_message = str(error_data.get("message") or error_payload.get("message") or error_payload.get("detail") or error_payload.get("title") or "no response message") if isinstance(error_payload, dict) else "no response message"
-        error_name = str(error_payload.get("error_name") or "") if isinstance(error_payload, dict) else ""
-        ray_id = str(error_payload.get("ray_id") or error_payload.get("instance") or "") if isinstance(error_payload, dict) else ""
-        cf_code = error_payload.get("error_code") if isinstance(error_payload, dict) else None
-        # Defensive redaction: never echo a key if a proxy unexpectedly includes it.
-        error_message = error_message.replace(api_key, "[REDACTED]")[:220]
-        if exc.code == 429:
-            _groq_warn_once("RATE_LIMIT", "Groq returned HTTP 429; falling back to local strategy.")
-        elif exc.code == 403:
-            # Treat a forbidden response as non-retryable during this run.
-            _GROQ_DISABLED_FOR_PROCESS = True
-            if cf_code == 1010 or error_name == "browser_signature_banned":
-                ray_part = f"; ray_id={ray_id}" if ray_id else ""
-                _groq_warn_once("CLOUDFLARE_BLOCK", f"Cloudflare Error 1010 browser_signature_banned{ray_part}; stop retries and contact Groq support. Using local strategy for the rest of this run.")
-            else:
-                detail = f" ({error_code})" if error_code else ""
-                ray_part = f"; ray_id={ray_id}" if ray_id else ""
-                _groq_warn_once("AUTH_OR_ACCESS", f"Groq returned HTTP 403{detail}: {error_message}{ray_part}. Disabled further Groq calls for this run; using local strategy.")
-        elif exc.code == 401:
-            _GROQ_DISABLED_FOR_PROCESS = True
-            _groq_warn_once("AUTH_OR_ACCESS", f"Groq returned HTTP 401: {error_message}. Disabled further Groq calls for this run; check that GROQ_API_KEY is valid.")
+        if isinstance(error_data, dict):
+            error_code = str(error_data.get("code") or "")
+            error_message = str(error_data.get("message") or error_payload.get("message") or error_payload.get("detail") or "no response message")
         else:
-            _groq_warn_once("HTTP_ERROR", f"Groq returned HTTP {exc.code}: {error_message}; falling back to local strategy.")
+            error_code = ""
+            error_message = str(error_data or error_payload.get("message") or error_payload.get("detail") or "no response message")
+        error_message = error_message.replace(api_key, "[REDACTED]")[:180]
+        detail = f" ({error_code})" if error_code else ""
+        if exc.code in (401, 403, 429):
+            # Auth, access, and rate-limit errors should not be retried for every choice.
+            _MISTRAL_DISABLED_FOR_PROCESS = True
+            _mistral_warn_once("API_ACCESS", f"Mistral returned HTTP {exc.code}{detail}: {error_message}. Disabled more Mistral calls for this workflow run; using local strategy.")
+        else:
+            _mistral_warn_once("HTTP_ERROR", f"Mistral returned HTTP {exc.code}{detail}: {error_message}; falling back to local strategy.")
         return None
     except Exception as exc:
-        _groq_warn_once("REQUEST_ERROR", f"Groq request failed ({type(exc).__name__}); falling back to local strategy.")
+        _mistral_warn_once("REQUEST_ERROR", f"Mistral request failed ({type(exc).__name__}); falling back to local strategy.")
         return None
 
     try:
@@ -379,11 +365,11 @@ def _groq_pick(legal_strings, observation, select, options):
         parsed = json.loads(str(content).strip())
         action = str(parsed.get("action", "")).strip()
         if action in legal_strings:
-            print("GROQ_STRATEGY_USED:", json.dumps({"model": _GROQ_MODEL, "callsThisMatch": _GROQ_CALLS_THIS_MATCH}), flush=True)
+            print("MISTRAL_STRATEGY_USED:", json.dumps({"model": _MISTRAL_MODEL, "callsThisMatch": _MISTRAL_CALLS_THIS_MATCH}), flush=True)
             return action
-        _groq_warn_once("INVALID_ACTION", "The model response was not one of the legal actions; using local strategy.")
+        _mistral_warn_once("INVALID_ACTION", "The model response was not one of the legal actions; using local strategy.")
     except Exception:
-        _groq_warn_once("INVALID_RESPONSE", "Could not parse a valid action from Groq; using local strategy.")
+        _mistral_warn_once("INVALID_RESPONSE", "Could not parse a valid action from Mistral; using local strategy.")
     return None
 
 
@@ -407,8 +393,8 @@ def act(context: dict[str, Any]):
         # The first legal value is a valid fallback and is preferable to a forfeit.
         return {"action": legal_strings[0]}
 
-    # Try a small number of Groq decisions per match; if anything fails, use heuristics.
-    llm_action = _groq_pick(legal_strings, observation, select, options)
+    # Ask Mistral for one high-impact decision per match; if anything fails, use heuristics.
+    llm_action = _mistral_pick(legal_strings, observation, select, options)
     if llm_action is not None:
         return {"action": llm_action}
 
