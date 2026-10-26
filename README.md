@@ -7,14 +7,14 @@ Nandu AI is registered and active in DevFun Arena.
 - **Competition:** `[TCG] Playground S4`
 - **Competition ID:** `cmvmddsux8tt6ymnx3teo78ie`
 - **Entry mode:** owner-hosted practice
-- **Cost / stakes:** free; no prizes or money at stake
-- **Season allowance:** up to 300 matches shared across versions
+- **Cost / stakes:** free practice; no money is staked
+- **Season allowance:** up to 1,500 matches shared across versions, based on the latest season announcement
 
 ## Run free practice matches in batches
 
-Open **Actions → Enter free TCG Playground Season 4 → Run workflow** in GitHub. Choose **1, 3, or 5** matches for that run; the default is **5**. Nandu AI plays its own turns automatically for each match, then starts the next match in the batch.
+Open **Actions → Enter free TCG Playground Season 4 → Run workflow** in GitHub. Choose **1, 3, or 5** matches for that run; the default is **5**. During provider testing, run just **1** match first.
 
-The workflow verifies that the exact season is still active and open before playing. It stores the outcome and match count in `.arena-tcg-state` after every settled match, and stops starting matches at the 300-match season limit. Runs are serialized so two batches from this workflow do not overlap. There is no schedule enabled; a batch starts only when you manually run the workflow or push the dedicated trigger file.
+The workflow verifies that the exact season is still active and open before playing. It stores the outcome and match count in `.arena-tcg-state` after every settled match, and stops starting matches at the 1,500-match season limit. Runs are serialized so two batches from this workflow do not overlap. There is no schedule enabled; a batch starts only when you manually run the workflow or push the dedicated trigger file.
 
 [Open the GitHub Actions page](https://github.com/Nandeeswarudu/devfun-free-agent/actions).
 
@@ -22,14 +22,16 @@ The Arena accepted the owner-hosted join, so this season is being played through
 
 ## Strategy
 
-`harness/strategy.py` uses live card and attack metadata copied into the runner's temporary bundle. Groq integration is implemented for `openai/gpt-oss-20b`, but calls are **temporarily disabled** because Groq's Cloudflare edge returned non-retryable Error 1010 (`browser_signature_banned`) to both the model-list and chat-completions tests. The bot therefore uses its local rule-based strategy until Groq support resolves the block. The workflow passes `GROQ_API_KEY` from GitHub Actions Secrets; no key is stored in the repository.
+`harness/strategy.py` uses live card and attack metadata copied into the runner's temporary bundle. Mistral integration uses the official chat-completions endpoint and the `mistral-small-latest` model. The workflow reads `MISTRAL_API_KEY` from GitHub Actions Secrets; the key is never stored in the repository.
 
-Cloudflare's guidance for Error 1010 is to notify the website owner; only Groq can review this block for `api.groq.com`. See [Cloudflare Error 1010](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-1xxx-errors/error-1010/).
+To conserve Free-mode usage, the agent makes at most **one Mistral request per match**, only for choices with a compact set of legal actions. If the key, model, API, network, or free-tier quota is unavailable, it falls back to the local rule-based strategy. Mistral's docs say Studio Free mode includes limited usage and rate limits; confirm your organization remains on Free mode and pay-as-you-go is not enabled if you need to avoid charges. [Mistral API key setup](https://docs.mistral.ai/getting-started/quickstarts/studio/activate-and-generate-api-key) · [API usage limits](https://docs.mistral.ai/admin/billing-usage/usage-limits)
+
+Before starting a match, use **Actions → Test Mistral API (no Arena match) → Run workflow**. It makes one small API request and does not enter a game.
 
 ## Practice log
 
-Two free practice matches had settled before batch mode was added. Both were losses:
+Saved match count currently starts at **9** recorded/estimated matches. Earlier practice losses included:
 - Match `2950b773-c8c9-412d-9336-63ffbeb917a4`: opponent **Ironclad**; loss reason `no_active_pokemon`.
 - Match `974753e2-73f7-4dc6-8a3d-5b18e3a0e611`: loss reason `all_prizes_taken`.
 
-These results are for practice only, with no money at stake. The agent has not entered a paid or ranked competition.
+The saved state tracks settled matches and one prior terminal match whose exact outcome was not captured. These runs are practice-only and no money is staked.
