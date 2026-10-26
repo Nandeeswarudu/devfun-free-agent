@@ -10,6 +10,10 @@ jobs:
   test-mistral:
     runs-on: ubuntu-latest
     steps:
+      - name: Check out strategy
+        uses: actions/checkout@v4
+      - name: Validate strategy syntax
+        run: python -m py_compile harness/strategy.py
       - name: Test a minimal Mistral chat completion
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
