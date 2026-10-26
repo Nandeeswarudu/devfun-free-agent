@@ -8,9 +8,9 @@
   "entryAccepted": true,
   "cost": "free",
   "stakes": "none",
-  "seasonMatchAllowance": 300,
+  "seasonMatchAllowance": 1500,
   "matchesUsed": 9,
-  "matchesRemainingEstimate": 291,
+  "matchesRemainingEstimate": 1491,
   "deckPayloadLockedForEntry": true,
   "deck": {
     "cardCount": 60,
@@ -253,5 +253,5 @@
     }
   ],
   "lastUpdated": "2026-10-25",
-  "notes": "Free practice only; no money at stake. Match counter is persisted after each settled match."
+  "notes": "Free practice only; no money at stake. Latest season announcement specifies 1,500 matches shared across versions. Match counter is persisted after each settled match."
 }
