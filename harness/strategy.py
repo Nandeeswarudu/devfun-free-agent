@@ -347,10 +347,24 @@ def _mistral_pick(legal_strings, observation, select, options):
             error_message = str(error_data or error_payload.get("message") or error_payload.get("detail") or "no response message")
         error_message = error_message.replace(api_key, "[REDACTED]")[:180]
         detail = f" ({error_code})" if error_code else ""
+        error_type = str(error_data.get("type") or "") if isinstance(error_data, dict) else ""
+        error_param = str(error_data.get("param") or "") if isinstance(error_data, dict) else ""
+        metadata = []
+        if error_type:
+            metadata.append("type=" + error_type[:80])
+        if error_param:
+            metadata.append("param=" + error_param[:80])
+        rate_headers = []
+        for header_name, header_value in getattr(exc, "headers", {}).items():
+            if "ratelimit" in header_name.lower() or header_name.lower() == "retry-after":
+                rate_headers.append(f"{header_name}={str(header_value)[:80]}")
+        diagnostic = ("; " + ", ".join(metadata)) if metadata else ""
+        if rate_headers:
+            diagnostic += "; " + ", ".join(rate_headers[:8])
         if exc.code in (400, 401, 402, 403, 404, 429):
             # Request, model, auth, access, billing, and rate-limit errors should not repeat across the batch.
             _MISTRAL_DISABLED_FOR_PROCESS = True
-            _mistral_warn_once("API_ACCESS", f"Mistral returned HTTP {exc.code}{detail}: {error_message}. Disabled more Mistral calls for this workflow run; using local strategy.")
+            _mistral_warn_once("API_ACCESS", f"Mistral returned HTTP {exc.code}{detail}: {error_message}{diagnostic}. Disabled more Mistral calls for this workflow run; using local strategy.")
         else:
             _mistral_warn_once("HTTP_ERROR", f"Mistral returned HTTP {exc.code}{detail}: {error_message}; falling back to local strategy.")
         return None
