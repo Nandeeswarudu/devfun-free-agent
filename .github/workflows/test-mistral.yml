@@ -1,0 +1,73 @@
+name: Test Mistral API (no Arena match)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-mistral:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test a minimal Mistral chat completion
+        env:
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          MISTRAL_MODEL: mistral-small-latest
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+          key = os.environ.get("MISTRAL_API_KEY", "").strip()
+          if not key:
+              print("MISTRAL_TEST_FAILED: GitHub secret MISTRAL_API_KEY is missing.")
+              raise SystemExit(2)
+
+          body = {
+              "model": os.environ.get("MISTRAL_MODEL", "mistral-small-latest"),
+              "messages": [{"role": "user", "content": "Reply with exactly READY."}],
+              "temperature": 0,
+              "max_tokens": 10
+          }
+          request = urllib.request.Request(
+              "https://api.mistral.ai/v1/chat/completions",
+              data=json.dumps(body).encode("utf-8"),
+              headers={
+                  "Authorization": "Bearer " + key,
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+                  "User-Agent": "NanduAI/1.0 (Mistral API diagnostic)"
+              },
+              method="POST"
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  result = json.loads(response.read().decode("utf-8"))
+                  content = str(result["choices"][0]["message"]["content"]).strip()
+                  print("MISTRAL_TEST_OK")
+                  print(json.dumps({
+                      "httpStatus": response.status,
+                      "model": result.get("model", body["model"]),
+                      "response": content[:80],
+                      "usage": result.get("usage")
+                  }))
+          except urllib.error.HTTPError as exc:
+              try:
+                  error = json.loads(exc.read().decode("utf-8", "replace"))
+              except Exception:
+                  error = {}
+              if isinstance(error, dict):
+                  details = error.get("message") or error.get("detail") or error.get("error") or "No error detail returned"
+              else:
+                  details = "No error detail returned"
+              print("MISTRAL_TEST_FAILED")
+              print(json.dumps({"httpStatus": exc.code, "details": str(details).replace(key, "[REDACTED]")[:300]}))
+              raise SystemExit(3)
+          except Exception as exc:
+              print("MISTRAL_TEST_FAILED:", type(exc).__name__)
+              raise SystemExit(4)
+          PY
