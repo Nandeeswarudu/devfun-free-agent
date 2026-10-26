@@ -36,9 +36,9 @@ jobs:
       - name: Verify eligibility, build legal deck, and join free practice
         env:
           ARENA_API_KEY: ${{ secrets.ARENA_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GROQ_MODEL: openai/gpt-oss-20b
-          GROQ_ENABLED: false
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          MISTRAL_MODEL: mistral-small-latest
+          MISTRAL_ENABLED: true
           BATCH_MATCHES: ${{ github.event.inputs.match_count || '5' }}
         run: |
           python - <<'PY'
@@ -123,14 +123,14 @@ jobs:
               print("STOP: This exact season is not active/open for entry.")
               print(json.dumps({"status":detail.get("status"),"admissionMode":active_item.get("admissionMode")}))
               raise SystemExit(16)
-          if detail.get("gameType") != "PokemonTcg" or "free" not in rules or "nothing at stake" not in rules or "300 matches" not in rules:
-              print("STOP: Live rules no longer confirm free no-stakes practice with a 300-match season allowance.")
+          if detail.get("gameType") != "PokemonTcg" or "free" not in rules or "nothing at stake" not in rules:
+              print("STOP: Live rules no longer confirm free, no-stakes TCG practice.")
               print(json.dumps({"gameType":detail.get("gameType"),"rules":detail.get("rules")}))
               raise SystemExit(17)
           print("PREFLIGHT_OK")
           print(json.dumps({"competition":detail.get("name"),"id":CID,"status":detail.get("status"),
               "admissionMode":active_item.get("admissionMode"),"executionMode":detail.get("executionMode"),
-              "entry":"free","stakes":"none","seasonMatchAllowance":"300 shared across all versions"},indent=2))
+              "entry":"free","stakes":"none","seasonMatchAllowance":"1500 shared across all versions per latest season announcement"},indent=2))
 
           profile = get("/agent/me")
           if profile.get("status") != "Active":
@@ -326,11 +326,11 @@ jobs:
           if requested_matches not in (1, 3, 5):
               print("STOP: Batch size must be 1, 3, or 5.")
               raise SystemExit(41)
-          if matches_used >= 300:
-              print("SEASON_MATCH_CAP_REACHED:", json.dumps({"matchesUsed": matches_used, "cap": 300}))
+          if matches_used >= 1500:
+              print("SEASON_MATCH_CAP_REACHED:", json.dumps({"matchesUsed": matches_used, "cap": 1500}))
               raise SystemExit(0)
-          batch_count = min(requested_matches, 300 - matches_used)
-          print("BATCH_PLAN:", json.dumps({"alreadyUsed": matches_used, "thisRun": batch_count, "cap": 300}))
+          batch_count = min(requested_matches, 1500 - matches_used)
+          print("BATCH_PLAN:", json.dumps({"alreadyUsed": matches_used, "thisRun": batch_count, "cap": 1500}))
 
           import subprocess
           def persist_settled_match(match_id, action_count, match_status, match_result):
@@ -350,7 +350,7 @@ jobs:
               })
               season_state["matches"] = saved
               season_state["matchesUsed"] = matches_used + 1
-              season_state["matchesRemainingEstimate"] = max(0, 300 - (matches_used + 1))
+              season_state["matchesRemainingEstimate"] = max(0, 1500 - (matches_used + 1))
               season_state["lastUpdated"] = time.strftime("%Y-%m-%d")
               season_state["notes"] = "Free practice only; no money at stake. Match counter is persisted after each settled match."
               state_path.write_text(json.dumps(season_state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -365,7 +365,7 @@ jobs:
               elif diff.returncode != 0:
                   raise RuntimeError("Could not inspect saved match-state changes")
               matches_used += 1
-              print("PERSISTED_MATCH_COUNT:", json.dumps({"used": matches_used, "remaining": max(0, 300 - matches_used)}))
+              print("PERSISTED_MATCH_COUNT:", json.dumps({"used": matches_used, "remaining": max(0, 1500 - matches_used)}))
 
           spec=importlib.util.spec_from_file_location("devfun_tcg_strategy", "harness/strategy.py")
           strategy=importlib.util.module_from_spec(spec)
@@ -467,7 +467,7 @@ jobs:
               print("BUNDLE_MODE_FALLBACK: batch runner is not used for bundle-engine mode; using the existing one-submission fallback.")
           else:
               print("OWNER_HOSTED_BATCH_COMPLETE:", json.dumps({"matchesPlayedThisRun": batch_count,
-                  "matchesUsed": matches_used, "remaining": max(0, 300 - matches_used)}))
+                  "matchesUsed": matches_used, "remaining": max(0, 1500 - matches_used)}))
               raise SystemExit(0)
 
           # Hosted bundle submission. The season was rechecked immediately above.
