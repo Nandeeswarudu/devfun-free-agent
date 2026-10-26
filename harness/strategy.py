@@ -347,8 +347,8 @@ def _mistral_pick(legal_strings, observation, select, options):
             error_message = str(error_data or error_payload.get("message") or error_payload.get("detail") or "no response message")
         error_message = error_message.replace(api_key, "[REDACTED]")[:180]
         detail = f" ({error_code})" if error_code else ""
-        if exc.code in (401, 403, 429):
-            # Auth, access, and rate-limit errors should not be retried for every choice.
+        if exc.code in (400, 401, 402, 403, 404, 429):
+            # Request, model, auth, access, billing, and rate-limit errors should not repeat across the batch.
             _MISTRAL_DISABLED_FOR_PROCESS = True
             _mistral_warn_once("API_ACCESS", f"Mistral returned HTTP {exc.code}{detail}: {error_message}. Disabled more Mistral calls for this workflow run; using local strategy.")
         else:
