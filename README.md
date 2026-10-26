@@ -22,7 +22,7 @@ The Arena accepted the owner-hosted join, so this season is being played through
 
 ## Strategy
 
-`harness/strategy.py` uses live card and attack metadata copied into the runner's temporary bundle. Mistral integration uses the official chat-completions endpoint and the `mistral-small-latest` model. The workflow reads `MISTRAL_API_KEY` from GitHub Actions Secrets; the key is never stored in the repository.
+`harness/strategy.py` uses live card and attack metadata copied into the runner's temporary bundle. Mistral integration uses the official chat-completions endpoint and the `mistral-small-2603` model. The workflow reads `MISTRAL_API_KEY` from GitHub Actions Secrets; the key is never stored in the repository.
 
 To conserve Free-mode usage, the agent makes at most **one Mistral request per match**, only for choices with a compact set of legal actions. If the key, model, API, network, or free-tier quota is unavailable, it falls back to the local rule-based strategy. Mistral's docs say Studio Free mode includes limited usage and rate limits; confirm your organization remains on Free mode and pay-as-you-go is not enabled if you need to avoid charges. [Mistral API key setup](https://docs.mistral.ai/getting-started/quickstarts/studio/activate-and-generate-api-key) · [API usage limits](https://docs.mistral.ai/admin/billing-usage/usage-limits)
 
