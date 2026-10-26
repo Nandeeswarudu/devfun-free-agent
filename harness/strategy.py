@@ -214,7 +214,7 @@ def _option_score(option, select, observation):
 
 # Optional Mistral-powered decisions. The local heuristic policy remains the safe fallback.
 _MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
-_MISTRAL_MODEL = os.environ.get("MISTRAL_MODEL", "mistral-small-latest")
+_MISTRAL_MODEL = os.environ.get("MISTRAL_MODEL", "mistral-small-2603")
 _MISTRAL_MAX_CALLS_PER_MATCH = 1
 _MISTRAL_MIN_INTERVAL_SECONDS = 3.0
 _MISTRAL_CALLS_THIS_MATCH = 0
