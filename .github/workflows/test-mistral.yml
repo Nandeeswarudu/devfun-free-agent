@@ -72,9 +72,12 @@ jobs:
               else:
                   details = "No error detail returned"
                   error_type = error_code = error_param = None
-              rate_headers = {
+              diagnostic_headers = {
                   name: value for name, value in exc.headers.items()
-                  if "ratelimit" in name.lower() or name.lower() == "retry-after"
+                  if (
+                      "ratelimit" in name.lower()
+                      or name.lower() in ("retry-after", "mistral-correlation-id", "x-kong-request-id")
+                  )
               }
               print("MISTRAL_TEST_FAILED")
               print(json.dumps({
@@ -83,7 +86,7 @@ jobs:
                   "errorCode": error_code,
                   "errorParam": error_param,
                   "details": str(details).replace(key, "[REDACTED]")[:300],
-                  "rateLimitHeaders": rate_headers
+                  "diagnosticHeaders": diagnostic_headers
               }))
               raise SystemExit(3)
           except Exception as exc:
